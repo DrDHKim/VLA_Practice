@@ -1,0 +1,20 @@
+[project]
+name = "vla-drive"
+version = "0.1.0"
+description = "Starter kit for VLA-based autonomous driving research."
+requires-python = ">=3.10"
+dependencies = [
+  "numpy",
+  "torch",
+  "pydantic",
+  "PyYAML",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+

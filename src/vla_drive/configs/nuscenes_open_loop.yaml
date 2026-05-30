@@ -1,0 +1,8 @@
+defaults:
+  - base
+
+data:
+  dataset: nuscenes
+  root: data/processed/nuscenes
+  version: v1.0-mini
+

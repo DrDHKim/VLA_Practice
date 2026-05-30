@@ -1,0 +1,14 @@
+defaults:
+  - base
+
+data:
+  dataset: carla
+  root: data/processed/carla
+
+simulation:
+  host: 127.0.0.1
+  port: 2000
+  town: Town01
+  weather: ClearNoon
+  fixed_delta_seconds: 0.05
+
