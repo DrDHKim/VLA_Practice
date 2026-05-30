@@ -1,22 +1,22 @@
-# Experiments
+# 실험 (Experiments)
 
-## Initial Decision
+## 초기 판단
 
-Use a small custom VLA baseline first:
+먼저 작은 custom VLA baseline을 사용한다.
 
 - VLM backbone
 - waypoint regression action head
-- PID/MPC controller in CARLA
+- CARLA 안의 PID/MPC controller
 - LoRA/QLoRA fine-tuning
 
-Use OpenDriveVLA/AutoVLA as architecture references. Use Alpamayo only as a large baseline or teacher until the local pipeline is stable.
+OpenDriveVLA/AutoVLA는 architecture reference로 사용한다. Alpamayo는 local pipeline이 안정되기 전까지 large baseline 또는 teacher로만 본다.
 
-Consequences:
+결과:
 
-- The first milestone must be achievable as a tiny MacBook smoke run.
-- The RTX 5090 is the medium-scale version of the same data collection, training, and evaluation loop.
-- Results will not match SOTA initially.
-- The project keeps the option to move to AIP/H100 later without locking in too early.
+- 첫 milestone은 MacBook tiny smoke run으로 달성 가능해야 한다.
+- RTX 5090은 같은 data collection, training, evaluation loop의 medium-scale 버전이다.
+- 초기 결과는 SOTA와 맞지 않아도 된다.
+- AIP/H100으로 너무 일찍 lock-in되지 않도록 migration option을 유지한다.
 
 ## Experiment Matrix
 
@@ -25,25 +25,25 @@ Consequences:
 - model: tiny random VLA policy
 - data: 10 CARLA samples
 - machine: MacBook
-- goal: code path runs without CUDA/CARLA errors
+- goal: code path가 CUDA/CARLA error 없이 실행됨
 
 ### E01 CARLA Imitation Baseline
 
 - model: frozen VLM + waypoint head
-- data: MacBook tiny route first, then up to 1 hour CARLA expert data on RTX 5090
+- data: MacBook tiny route 먼저, 이후 RTX 5090에서 최대 1시간 CARLA expert data
 - metric: waypoint L1, FDE
 
 ### E02 LoRA VLA
 
 - model: VLM LoRA + waypoint head
 - data: CARLA clear/rain/fog
-- machine: RTX 5090 after E00/E01 pass on MacBook
+- machine: E00/E01이 MacBook에서 통과한 뒤 RTX 5090
 - metric: open-loop + 5 closed-loop routes
 
 ### E03 nuScenes Transfer
 
 - model: E02 initialized
-- data: nuScenes mini, then full
+- data: nuScenes mini, 이후 full
 - metric: open-loop trajectory error
 
 ### E04 Reasoning Auxiliary Loss
@@ -60,8 +60,8 @@ Consequences:
 
 ### E06 AIP/H100 Scale-Up
 
-- model: selected best E02-E05 variant
-- data: expanded CARLA/nuScenes/NAVSIM or Bench2Drive subset
+- model: 선택된 best E02-E05 variant
+- data: expanded CARLA/nuScenes/NAVSIM 또는 Bench2Drive subset
 - machine: AIP/H100 only
-- gate: MacBook smoke run and RTX 5090 medium run already passed
+- gate: MacBook smoke run과 RTX 5090 medium run이 이미 통과됨
 - metric: ablation report, long-run closed-loop score, failure taxonomy

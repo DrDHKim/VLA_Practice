@@ -1,4 +1,4 @@
-# VLA Autonomous Driving Project Plan
+# VLA 자율주행 Project Plan
 
 ## 0. 핵심 판단
 

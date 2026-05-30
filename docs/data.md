@@ -1,52 +1,52 @@
-# Data
+# 데이터 (Data)
 
-## Dataset Priority
+## Dataset 우선순위
 
 1. CARLA short routes
 2. CARLA weather variants
 3. nuScenes mini
 4. nuScenes full
-5. NAVSIM or Bench2Drive
+5. NAVSIM 또는 Bench2Drive
 
-## CARLA First
+## CARLA 우선
 
-CARLA is the fastest path to closed-loop feedback.
+CARLA는 closed-loop feedback을 가장 빨리 얻을 수 있는 경로다.
 
-Scale policy:
+Scale 정책:
 
-- MacBook: collect 1-3 tiny smoke routes first, with low traffic and low image resolution.
-- RTX 5090: scale to more routes, weather variants, traffic density, and longer collection jobs.
-- AIP/H100: use only after the schema and evaluation are stable on MacBook and RTX 5090.
+- MacBook: 먼저 low traffic, low image resolution으로 1-3개의 tiny smoke route를 수집한다.
+- RTX 5090: 더 많은 route, weather variant, traffic density, 긴 collection job으로 확장한다.
+- AIP/H100: schema와 evaluation이 MacBook/RTX 5090에서 안정된 뒤에만 사용한다.
 
-Tasks:
+작업:
 
-- collect 10 short routes with clear weather
-- collect 10 routes with rain/fog/night variants
-- log RGB, ego state, route command, expert waypoints/control
-- build train/val/test splits by route, not by frame
+- clear weather에서 10개 short route를 수집한다.
+- rain/fog/night variant에서 10개 route를 수집한다.
+- RGB, ego state, route command, expert waypoints/control을 기록한다.
+- train/val/test split은 frame 단위가 아니라 route 단위로 나눈다.
 
-## nuScenes Second
+## nuScenes 다음
 
-Use nuScenes mini before full nuScenes.
+full nuScenes보다 nuScenes mini를 먼저 사용한다.
 
-The mini split is suitable for MacBook schema/debug work. Full nuScenes should wait until the RTX 5090 or external storage path is ready.
+mini split은 MacBook schema/debug 작업에 적합하다. full nuScenes는 RTX 5090 또는 external storage path가 준비된 뒤 처리한다.
 
-Tasks:
+작업:
 
-- convert samples into the common schema
-- extract ego-frame future trajectory
-- map scene descriptions or route commands into text prompts
-- run open-loop metric only at first
+- sample을 common schema로 변환한다.
+- ego-frame future trajectory를 추출한다.
+- scene description 또는 route command를 text prompt로 매핑한다.
+- 처음에는 open-loop metric만 실행한다.
 
-## NAVSIM / Bench2Drive Third
+## NAVSIM / Bench2Drive 이후
 
-Add only after baseline training works.
+baseline training이 동작한 뒤 추가한다.
 
-Tasks:
+작업:
 
-- verify install
-- map metrics into `closed_loop_metrics.py`
-- compare to literature metrics where possible
+- install을 검증한다.
+- metric을 `closed_loop_metrics.py`에 매핑한다.
+- 가능한 경우 literature metric과 비교한다.
 
 ## Observation Schema
 
@@ -73,9 +73,9 @@ low_level_control:
 reasoning: optional str
 ```
 
-## Initial File Format
+## 초기 파일 형식
 
-Start with JSONL metadata plus image files:
+JSONL metadata와 image file 조합으로 시작한다.
 
 ```text
 data/processed/carla/
@@ -89,8 +89,8 @@ data/processed/carla/
     └── test.txt
 ```
 
-Do not design a complex binary format until the schema stabilizes.
+schema가 안정되기 전에는 복잡한 binary format을 설계하지 않는다.
 
 ## Split Rule
 
-Split by route or scene, not by frame. Frame-level random splits leak near-duplicate observations.
+frame 단위 random split은 거의 같은 observation을 train/test에 동시에 넣을 수 있다. split은 route 또는 scene 단위로 나눈다.

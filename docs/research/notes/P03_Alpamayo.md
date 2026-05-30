@@ -22,9 +22,8 @@ TODO.
 
 ## What to Copy
 
-- Long-tail reasoning and teacher model usage.
+- long-tail reasoning과 teacher model 사용 방식을 참고한다.
 
 ## What Not to Copy
 
-- Do not make 10B full fine-tuning the first milestone.
-
+- 10B full fine-tuning을 첫 milestone으로 만들지 않는다.

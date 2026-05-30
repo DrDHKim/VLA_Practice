@@ -1,38 +1,38 @@
 # Handbook
 
-This is the compact working guide for people and local LLMs. Detailed execution order lives in `TASKS.md`.
+사람과 local LLM을 위한 압축 작업 가이드다. 자세한 실행 순서는 `TASKS.md`에 있다.
 
 ## Local LLM Workflow
 
-Required reading order:
+필수 읽기 순서:
 
 1. `README.md`
 2. `project_plan.md`
 3. `TASKS.md`
-4. `docs/setup.md` if offline setup matters
-5. the files listed under the current task
+4. offline setup이 필요하면 `docs/setup.md`
+5. 현재 task에 적힌 파일
 
-Rules:
+규칙:
 
-- Do not redesign the repository.
-- Do not skip milestones.
-- Do not implement paper extensions before CARLA and baseline training work.
-- Prefer small, testable code.
-- If internet is unavailable, continue with local stubs and mark missing downloads as blocked.
-- After editing code, run the smallest relevant test.
+- repository를 재설계하지 않는다.
+- milestone을 건너뛰지 않는다.
+- CARLA와 baseline training이 동작하기 전에 paper extension을 구현하지 않는다.
+- 작고 test 가능한 code를 우선한다.
+- internet이 없으면 local stub으로 계속 진행하고, 필요한 download는 blocked로 표시한다.
+- code를 수정한 뒤 가장 작은 관련 test를 실행한다.
 
-Progress report format:
+Progress report 형식:
 
 ```text
 Task: M1.1 Implement CarlaClient
-Files changed:
+변경 파일:
 - src/vla_drive/simulation/carla_client.py
-Validation:
+검증:
 - Connected to CARLA Town01
 Blocked:
 - None
-Next:
-- Implement RGB camera callback
+다음:
+- RGB camera callback 구현
 ```
 
 ## Architecture
@@ -59,25 +59,25 @@ PID/MPC controller
 steer / throttle / brake
 ```
 
-Waypoints come first because they are easier to debug than direct low-level controls, allow controller replacement without retraining, and match common planning metrics.
+waypoint를 먼저 쓰는 이유는 direct low-level control보다 debugging이 쉽고, retraining 없이 controller를 교체할 수 있으며, 일반적인 planning metric과 잘 맞기 때문이다.
 
-Later extensions:
+나중에 추가할 확장:
 
 - multi-view cameras
 - trajectory action tokenizer
 - reasoning auxiliary output
 - fast/slow reasoning mode
-- RL fine-tuning in CARLA
+- CARLA 안의 RL fine-tuning
 
 ## CARLA Pipeline
 
-First reliable loop:
+첫 reliable loop:
 
 ```text
 connect -> spawn -> sense -> predict waypoints -> control -> log -> cleanup
 ```
 
-Implementation files:
+구현 파일:
 
 - `src/vla_drive/simulation/carla_client.py`
 - `src/vla_drive/simulation/carla_agent.py`
@@ -86,48 +86,48 @@ Implementation files:
 - `scripts/collect_carla_data.py`
 - `scripts/eval_carla.sh`
 
-Minimum demo:
+최소 demo:
 
 - CARLA server running
-- one vehicle
-- one front RGB camera
-- one route
-- 30 seconds of driving
-- metadata JSONL and image frames saved
+- vehicle 1대
+- front RGB camera 1개
+- route 1개
+- 30초 driving
+- metadata JSONL과 image frame 저장
 
-Common failures:
+흔한 실패:
 
-- actors not cleaned up after crash
+- crash 후 actor cleanup 누락
 - async/sync mode mismatch
 - sensor queue lag
-- control commands applied before first observation
-- route completion metric tied to frame count instead of distance
+- 첫 observation 전에 control command 적용
+- route completion metric을 distance가 아니라 frame count에 묶음
 
 ## Data Pipeline
 
-All datasets should become `DrivingSample`:
+모든 dataset은 `DrivingSample`로 변환한다.
 
 - `Observation`
 - `ActionTarget`
 - optional reasoning text
 
-See `docs/data.md`.
+자세한 내용은 `docs/data.md`를 본다.
 
-Priority:
+우선순위:
 
 1. CARLA short routes
 2. CARLA weather variants
 3. nuScenes mini
 4. nuScenes full
-5. NAVSIM or Bench2Drive
+5. NAVSIM 또는 Bench2Drive
 
-Split by route or scene, not by frame.
+split은 frame 단위가 아니라 route 또는 scene 단위로 나눈다.
 
 ## Training Pipeline
 
-First goal: overfit 10-100 samples. Do not start large training until this works.
+첫 목표는 10-100개 sample에 overfit하는 것이다. 이것이 동작하기 전에는 large training을 시작하지 않는다.
 
-Training order:
+Training 순서:
 
 1. dummy backbone + waypoint head
 2. frozen VLM + waypoint head
@@ -136,14 +136,14 @@ Training order:
 5. reasoning auxiliary loss
 6. action tokenizer
 
-RTX 5090 rules:
+RTX 5090 규칙:
 
-- start batch size 1
-- use bf16
-- use gradient accumulation
-- use LoRA before full fine-tuning
-- lower image size before changing architecture
-- keep checkpoints outside git
+- batch size 1부터 시작한다.
+- bf16을 사용한다.
+- gradient accumulation을 사용한다.
+- full fine-tuning 전에 LoRA를 사용한다.
+- architecture를 바꾸기 전에 image size를 낮춘다.
+- checkpoint는 git 밖에 둔다.
 
 ## Evaluation
 
@@ -163,24 +163,24 @@ Closed-loop metrics:
 - infraction penalty
 - driving score
 
-Closed-loop failures should be categorized before changing the model. Many failures come from controller, route planner, sensor timing, or data bugs.
+model을 바꾸기 전에 closed-loop failure를 먼저 분류한다. 많은 failure는 controller, route planner, sensor timing, data bug에서 나온다.
 
 ## Hardware Strategy
 
-The hardware changes scale, not the pipeline. Each machine should run CARLA data collection, training, open-loop evaluation, and closed-loop evaluation at an appropriate size.
+하드웨어가 바꾸는 것은 scale이지 pipeline이 아니다. 각 장비는 적절한 규모로 CARLA data collection, training, open-loop evaluation, closed-loop evaluation을 실행해야 한다.
 
 MacBook:
 
-- use for the small end-to-end pilot: CARLA smoke data collection, tiny/small training, small open/closed-loop evaluation, docs, code editing, paper notes
-- keep routes short, resolution low, traffic light, and runs reproducible
-- keep offline bundle under 120GB
+- small end-to-end pilot에 사용한다: CARLA smoke data collection, tiny/small training, small open/closed-loop evaluation, docs, code editing, paper notes.
+- route는 짧게, resolution은 낮게, traffic은 가볍게 유지하고 run은 재현 가능하게 만든다.
+- offline bundle은 120GB 아래로 유지한다.
 
 RTX 5090:
 
-- use for the same pipeline at medium scale: more CARLA data, LoRA/QLoRA, repeated evaluation
-- avoid 10B full fine-tuning
+- 같은 pipeline을 medium scale로 실행한다: 더 많은 CARLA data, LoRA/QLoRA, 반복 evaluation.
+- 10B full fine-tuning은 피한다.
 
 Company AIP/H100 x2:
 
-- use only after MacBook smoke runs and RTX 5090 medium-scale runs are stable
-- code cannot be brought back after moving into that environment
+- MacBook smoke run과 RTX 5090 medium-scale run이 안정된 뒤에만 사용한다.
+- 이 환경으로 옮긴 뒤에는 code를 다시 가져올 수 없다.

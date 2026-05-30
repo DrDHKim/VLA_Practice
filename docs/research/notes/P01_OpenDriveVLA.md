@@ -2,15 +2,15 @@
 
 ## Inputs
 
-TODO: summarize 2D/3D visual tokens, ego state, driver command.
+TODO: 2D/3D visual tokens, ego state, driver command를 요약한다.
 
 ## Outputs
 
-TODO: summarize planning/action outputs.
+TODO: planning/action output을 요약한다.
 
 ## Training Data
 
-TODO: summarize nuScenes planning and QA data.
+TODO: nuScenes planning과 QA data를 요약한다.
 
 ## Action Representation
 
@@ -22,9 +22,8 @@ TODO.
 
 ## What to Copy
 
-- Use this as the main architecture reference for autonomous-driving-specific VLA.
+- autonomous-driving-specific VLA의 main architecture reference로 사용한다.
 
 ## What Not to Copy
 
-- Do not copy large-scale assumptions before local CARLA pipeline works.
-
+- local CARLA pipeline이 동작하기 전에 large-scale assumption을 복사하지 않는다.

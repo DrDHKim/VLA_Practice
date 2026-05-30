@@ -2,7 +2,7 @@
 
 ## Taxonomy
 
-TODO: summarize VLA categories and benchmark families.
+TODO: VLA category와 benchmark family를 요약한다.
 
 ## Missing Papers to Add
 

@@ -1,4 +1,4 @@
-# VLA Autonomous Driving Starter Kit
+# VLA 자율주행 Starter Kit
 
 이 저장소는 Vision-Language-Action(VLA)을 이용한 자율주행 연구/구현을 시작하기 위한 사전 작업 공간이다. 목표는 인터넷이 느리거나 없는 환경에서도 Qwen3 Coder 30B급 저성능 AI가 문서와 파일 스텁을 따라 끝까지 구현을 이어갈 수 있게 만드는 것이다.
 
