@@ -13,7 +13,7 @@ def _make_trajectories(n: int = 20, T: int = 8) -> list[np.ndarray]:
     rng = np.random.default_rng(0)
     trajs = []
     for _ in range(n):
-        deltas = rng.normal(loc=[1.0, 0.0], scale=[0.3, 0.1], size=(T, 2)).astype(np.float32)
+        deltas = rng.normal(loc=[1.0, 0.0, 0.0], scale=[0.3, 0.1, 0.05], size=(T, 3)).astype(np.float32)
         trajs.append(np.cumsum(deltas, axis=0))
     return trajs
 
@@ -30,8 +30,7 @@ def test_fit_encode_decode_roundtrip() -> None:
     assert tokens.min() >= 0 and tokens.max() < 16
 
     recovered = tok.decode(tokens)
-    assert recovered.shape == (8, 2)
-    # decode(encode(traj)) should be close (within quantization error)
+    assert recovered.shape == (8, 3)
     assert np.abs(recovered - traj).mean() < 1.0
 
 
@@ -90,4 +89,4 @@ def test_decode_waypoints() -> None:
         "ego_speed_mps": torch.tensor([1.0, 2.0]),
     }
     waypoints = policy.decode_waypoints(batch, tok)
-    assert waypoints.shape == (2, 8, 2)
+    assert waypoints.shape == (2, 8, 3)

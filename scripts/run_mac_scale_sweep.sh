@@ -7,7 +7,7 @@ set -euo pipefail
 # ============================================================
 
 PYTHON_BIN="${PYTHON_BIN:-.conda/bin/python}"
-METADATA_PATH="${METADATA_PATH:-/private/tmp/vla_drive_carla/m1_smoke/metadata.jsonl}"
+METADATA_PATH="${METADATA_PATH:-/Volumes/DATASET/vla_drive_carla/m1_smoke/metadata.jsonl}"
 OUT_DIR="${OUT_DIR:-outputs/reports/mac_scale}"
 SUMMARY_PATH="${SUMMARY_PATH:-outputs/reports/mac_scale_envelope.json}"
 DEVICE="${DEVICE:-cpu}"

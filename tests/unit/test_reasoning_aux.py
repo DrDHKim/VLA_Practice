@@ -33,10 +33,10 @@ def test_reasoning_aux_policy_forward_backward() -> None:
         "ego_speed_mps": torch.tensor([1.0, 2.0]),
         "reasoning_labels": torch.tensor([0, 1], dtype=torch.long),
     }
-    target = torch.zeros(2, 8, 2)
+    target = torch.zeros(2, 8, 3)
 
     output = policy(batch)
-    assert output["future_waypoints_ego"].shape == (2, 8, 2)
+    assert output["future_waypoints_ego"].shape == (2, 8, 3)
     assert output["reasoning_logits"].shape == (2, 4)
 
     loss = waypoint_prediction_loss(output["future_waypoints_ego"], target)

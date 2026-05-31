@@ -43,7 +43,10 @@ if [[ -f "$CONF" ]]; then
   perl -0pi -e 's/\[EnvironmentVariables\]\n(?:"WINED3DMETAL".*\n|"WINEDXVK".*\n|"CX_GRAPHICS_BACKEND".*\n|"WINEMSYNC".*\n|"D3DM_SUPPORT_DXR".*\n|"ROSETTA_ADVERTISE_AVX".*\n)*/[EnvironmentVariables]\n"WINED3DMETAL" = "1"\n"WINEDXVK" = "0"\n"CX_GRAPHICS_BACKEND" = "d3dmetal"\n"WINEMSYNC" = "1"\n"D3DM_SUPPORT_DXR" = "0"\n"ROSETTA_ADVERTISE_AVX" = "1"\n/' "$CONF"
 fi
 
+MAP_ARG="${CARLA_MAP:-}"
+
 exec "$WINE_BIN" --bottle "$BOTTLE" --cx-app 'C:\CARLA\CarlaUE4.exe' \
+  ${MAP_ARG:+"$MAP_ARG"} \
   "-quality-level=$QUALITY" \
   "-carla-rpc-port=$PORT" \
   "$@"

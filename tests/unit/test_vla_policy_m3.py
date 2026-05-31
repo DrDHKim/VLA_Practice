@@ -15,11 +15,11 @@ def test_dummy_vla_policy_forward_loss_backward() -> None:
         "images": torch.zeros(2, 3, 32, 32),
         "ego_speed_mps": torch.tensor([1.0, 2.0]),
     }
-    target = torch.zeros(2, 8, 2)
+    target = torch.zeros(2, 8, 3)
 
     output = policy(batch)
     pred = output["future_waypoints_ego"]
-    assert tuple(pred.shape) == (2, 8, 2)
+    assert tuple(pred.shape) == (2, 8, 3)
 
     loss = waypoint_prediction_loss(pred, target)
     loss.backward()
@@ -68,11 +68,11 @@ def test_vlm_policy_frozen_forward_and_backward(tmp_path) -> None:
         "images": torch.zeros(1, 3, 64, 64),
         "ego_speed_mps": torch.tensor([5.0]),
     }
-    target = torch.zeros(1, 8, 2)
+    target = torch.zeros(1, 8, 3)
 
     output = policy(batch)
     pred = output["future_waypoints_ego"]
-    assert pred.shape == (1, 8, 2)
+    assert pred.shape == (1, 8, 3)
 
     loss = waypoint_prediction_loss(pred, target)
     loss.backward()

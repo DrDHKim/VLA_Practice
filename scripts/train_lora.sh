@@ -2,13 +2,15 @@
 set -euo pipefail
 
 PYTHON_BIN="${PYTHON_BIN:-.conda/bin/python}"
-METADATA_PATH="${METADATA_PATH:-/private/tmp/vla_drive_carla/m1_smoke/metadata.jsonl}"
+METADATA_PATH="${METADATA_PATH:-/Volumes/DATASET/vla_drive_carla/m1_smoke/metadata.jsonl}"
 CHECKPOINT_DIR="${CHECKPOINT_DIR:-checkpoints/m4_dummy}"
 LOG_DIR="${LOG_DIR:-outputs/logs/m4_dummy}"
 
 ARGS=(
   -m vla_drive.training.train
   --stage "${STAGE:-dummy_overfit}"
+  --waypoint-count "${WAYPOINT_COUNT:-10}"
+  --waypoint-dim "${WAYPOINT_DIM:-3}"
   --metadata-path "$METADATA_PATH"
   --checkpoint-dir "$CHECKPOINT_DIR"
   --log-dir "$LOG_DIR"

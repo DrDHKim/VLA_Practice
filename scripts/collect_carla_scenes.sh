@@ -4,7 +4,7 @@ set -euo pipefail
 WINE_BIN="${WINE_BIN:-/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine}"
 BOTTLE="${CARLA_CROSSOVER_BOTTLE:-carla-rgb64}"
 CONFIG_PATH="${CONFIG_PATH:-src/vla_drive/configs/carla_mac_dataset.yaml}"
-OUTPUT_ROOT="${OUTPUT_ROOT:-/private/tmp/vla_drive_carla/mac_scenes}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-/Volumes/DATASET/vla_drive_carla/mac_scenes}"
 SCENE_COUNT="${SCENE_COUNT:-3}"
 SECONDS_PER_SCENE="${SECONDS_PER_SCENE:-60}"
 FPS="${FPS:-10}"
@@ -45,6 +45,8 @@ while ! nc -z "$CARLA_HOST" "$CARLA_PORT" >/dev/null 2>&1; do
   sleep 5
 done
 echo "CARLA server port is open."
+echo "CARLA 내부 초기화 대기 중 (120초)..."
+sleep 120
 echo
 
 echo "Starting CARLA scene collection..."

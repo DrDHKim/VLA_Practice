@@ -47,7 +47,7 @@ def test_jsonl_dataset_resolves_relative_image_paths_and_collates(tmp_path) -> N
 
     loader = DataLoader(dataset, batch_size=2, collate_fn=lambda batch: driving_collate_fn(batch, image_size=8))
     batch = next(iter(loader))
-    assert tuple(batch["images"].shape) == (2, 3, 8, 8)
-    assert tuple(batch["future_waypoints_ego"].shape) == (2, 8, 2)
+    assert tuple(batch["images"].shape) == (2, 3, 4, 3, 8, 8)
+    assert tuple(batch["future_waypoints_ego"].shape) == (2, 8, 3)
     assert tuple(batch["controls"].shape) == (2, 3)
     assert batch["prompts"][0].startswith("Drive with command=lane_follow")

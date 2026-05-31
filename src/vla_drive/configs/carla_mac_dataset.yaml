@@ -3,20 +3,20 @@ defaults:
 
 data:
   dataset: carla
-  root: /private/tmp/vla_drive_carla/mac_dataset_60s_320x180
+  root: /Volumes/DATASET/vla_drive_carla/mac_dataset_60s_320x180
 
 simulation:
   host: 127.0.0.1
   port: 2000
   town: Town01
   weather: ClearNoon
-  timeout_seconds: 30.0
+  timeout_seconds: 120.0
   synchronous_mode: false
   fixed_delta_seconds: 0.05
 
 collection:
   seconds: 60.0
-  fps: 10.0
+  fps: 10.0                 # 0.5 s temporal step = every 5 frames
   warmup_seconds: 2.0
   image_width: 320
   image_height: 180
@@ -24,5 +24,4 @@ collection:
   vehicle_filter: vehicle.tesla.model3
   target_speed_mps: 5.0
   route_length: 120
-  waypoint_spacing_m: 2.0
-  future_waypoint_count: 8
+  waypoint_spacing_m: 2.0  # only used for PID route planning, not for JSONL waypoints

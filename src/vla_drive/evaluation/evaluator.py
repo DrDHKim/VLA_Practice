@@ -195,7 +195,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate waypoint policy on JSONL open-loop data.")
     parser.add_argument("--mode", default="open_loop", choices=["open_loop"])
     parser.add_argument("--checkpoint-path", type=Path, default=Path("checkpoints/m4_dummy/latest.pt"))
-    parser.add_argument("--metadata-path", type=Path, default=Path("/private/tmp/vla_drive_carla/m1_smoke/metadata.jsonl"))
+    parser.add_argument("--metadata-path", type=Path, default=Path("/Volumes/DATASET/vla_drive_carla/m1_smoke/metadata.jsonl"))
     parser.add_argument("--report-path", type=Path, default=Path("outputs/reports/open_loop_m4_dummy.json"))
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--image-size", type=int, default=64)

@@ -9,7 +9,14 @@ from torch import nn
 
 
 class VLMBackbone(nn.Module):
-    """Thin wrapper around Qwen2.5-VL for image+text → pooled hidden state."""
+    """Qwen2.5-VL wrapper — supports AutoVLA-style 12-image input.
+
+    Input: batch["all_image_paths"]  — list[list[str]], shape [B, 12]
+           (3 cameras × 4 temporal frames, camera-major order)
+    Fallback: batch["image_paths"]   — list[str], shape [B] (single front frame)
+
+    Output: mean-pooled last hidden state [B, hidden_dim] in float32.
+    """
 
     def __init__(self, model_name_or_path: Union[str, Path], freeze: bool = True) -> None:
         super().__init__()
@@ -35,23 +42,40 @@ class VLMBackbone(nn.Module):
         self.model.eval() if self.freeze else self.model.train()
 
     def to(self, *args, **kwargs):
-        # propagate device/dtype change to inner model
         result = super().to(*args, **kwargs)
         if self.model is not None:
             self.model = self.model.to(*args, **kwargs)
         return result
 
     def encode(self, batch: dict) -> torch.Tensor:
-        """Return mean-pooled last-layer hidden state [B, hidden_dim]."""
+        """Return [B, hidden_dim] mean-pooled hidden state."""
         from PIL import Image
 
-        image_paths: list[str] = batch["image_paths"]
         prompts: list[str] = batch["prompts"]
 
-        pil_images = [Image.open(p).convert("RGB") for p in image_paths]
+        # Prefer 12-image multi-view paths; fall back to single front-image path.
+        all_paths: list[list[str]] | None = batch.get("all_image_paths")
+        if all_paths and len(all_paths[0]) > 1:
+            # Multi-image path: each sample gets 12 images (3 cam × 4 frame)
+            pil_per_sample = [
+                [Image.open(p).convert("RGB") for p in paths]
+                for paths in all_paths
+            ]
+            num_images_per_sample = len(pil_per_sample[0])
+        else:
+            # Single-image fallback
+            image_paths: list[str] = batch["image_paths"]
+            pil_per_sample = [[Image.open(p).convert("RGB")] for p in image_paths]
+            num_images_per_sample = 1
 
         messages_batch = [
-            [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": prompt}]}]
+            [
+                {
+                    "role": "user",
+                    "content": [{"type": "image"}] * num_images_per_sample
+                    + [{"type": "text", "text": prompt}],
+                }
+            ]
             for prompt in prompts
         ]
         texts = [
@@ -59,9 +83,12 @@ class VLMBackbone(nn.Module):
             for msgs in messages_batch
         ]
 
+        # Qwen2.5-VL processor expects a flat list of PIL images across the batch.
+        flat_images = [img for imgs in pil_per_sample for img in imgs]
+
         inputs = self.processor(
             text=texts,
-            images=pil_images,
+            images=flat_images,
             return_tensors="pt",
             padding=True,
         )
@@ -69,8 +96,9 @@ class VLMBackbone(nn.Module):
         device = next(iter(self.model.parameters())).device
         dtype = next(iter(self.model.parameters())).dtype
         inputs = {
-            k: v.to(device=device, dtype=dtype) if (torch.is_tensor(v) and v.is_floating_point()) else
-               v.to(device=device) if torch.is_tensor(v) else v
+            k: v.to(device=device, dtype=dtype) if (torch.is_tensor(v) and v.is_floating_point())
+            else v.to(device=device) if torch.is_tensor(v)
+            else v
             for k, v in inputs.items()
         }
 
@@ -78,8 +106,8 @@ class VLMBackbone(nn.Module):
         with ctx:
             outputs = self.model(**inputs, output_hidden_states=True, use_cache=False)
 
-        last_hidden = outputs.hidden_states[-1]  # [B, seq_len, hidden_dim]
-        return last_hidden.mean(dim=1).float()   # [B, hidden_dim] in float32
+        last_hidden = outputs.hidden_states[-1]   # [B, seq_len, hidden_dim]
+        return last_hidden.mean(dim=1).float()    # [B, hidden_dim]
 
 
 def _select_dtype() -> torch.dtype:
@@ -91,7 +119,11 @@ def _select_dtype() -> torch.dtype:
 
 
 class DummyDrivingBackbone(nn.Module):
-    """Small image/speed encoder for smoke tests before attaching a VLM."""
+    """Lightweight CNN backbone for smoke tests.
+
+    Accepts [B, NUM_CAMERAS, NUM_FRAMES, C, H, W] or legacy [B, C, H, W].
+    Front-camera current frame is used; remaining views/frames are ignored.
+    """
 
     def __init__(self, hidden_dim: int = 64) -> None:
         super().__init__()
@@ -110,8 +142,11 @@ class DummyDrivingBackbone(nn.Module):
             nn.GELU(),
         )
 
-    def encode(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
+    def encode(self, batch: dict) -> torch.Tensor:
         images = batch["images"].float()
+        # Support both [B, NUM_CAMERAS, NUM_FRAMES, C, H, W] and legacy [B, C, H, W]
+        if images.ndim == 6:
+            images = images[:, 0, 0]  # front camera, current frame → [B, C, H, W]
         speed = batch.get("ego_speed_mps")
         if speed is None:
             speed = torch.zeros(images.shape[0], device=images.device, dtype=images.dtype)

@@ -21,7 +21,7 @@ STEER_GAINS=(0.9 1.2 1.5)
 SPEED_KPS=(0.25 0.35)
 BRAKE_KPS=(0.25)
 
-OUT_DIR=/private/tmp/vla_drive_carla/pid_tuning
+OUT_DIR=/Volumes/DATASET/vla_drive_carla/pid_tuning
 
 # ============================================================
 # 여기 아래는 보통 수정하지 않는다.

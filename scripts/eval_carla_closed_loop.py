@@ -124,7 +124,7 @@ def main() -> None:
     parser.add_argument("--route-length", type=int, default=80)
     parser.add_argument("--waypoint-spacing-m", type=float, default=2.0)
     parser.add_argument("--future-waypoint-count", type=int, default=8)
-    parser.add_argument("--report-path", type=Path, default=Path("/private/tmp/vla_drive_carla/closed_loop_report.json"))
+    parser.add_argument("--report-path", type=Path, default=Path("/Volumes/DATASET/vla_drive_carla/closed_loop_report.json"))
     args = parser.parse_args()
 
     _add_carla_paths()

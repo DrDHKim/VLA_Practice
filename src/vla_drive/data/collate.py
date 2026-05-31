@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import torch
 
 from vla_drive.data.transforms import load_image_tensor
@@ -21,50 +23,86 @@ SLOW_REASONING_LABEL_TO_ID = {
     "turn_right_cruise": 5,
 }
 
+# Camera names and temporal suffixes, ordered to match AutoVLA's 3-cam × 4-frame layout.
+# Axis 0 = camera (front, front_left, front_right)
+# Axis 1 = time   (t0=current, t1=0.5s ago, t2=1.0s ago, t3=1.5s ago)
+_CAM_KEYS = (
+    ("camera_front",       "camera_front_t1",       "camera_front_t2",       "camera_front_t3"),
+    ("camera_front_left",  "camera_front_left_t1",  "camera_front_left_t2",  "camera_front_left_t3"),
+    ("camera_front_right", "camera_front_right_t1", "camera_front_right_t2", "camera_front_right_t3"),
+)
+NUM_CAMERAS = 3
+NUM_FRAMES = 4
+
 
 def driving_collate_fn(samples, image_size: int | None = None, reasoning_mode: str = "fast"):
-    """Convert DrivingSample objects into tensors and text prompts."""
-    images = torch.stack([load_image_tensor(sample.observation.camera_front, image_size=image_size) for sample in samples])
-    speeds = torch.tensor([sample.observation.ego_speed_mps for sample in samples], dtype=torch.float32)
-    waypoints = torch.tensor([sample.target.future_waypoints_ego for sample in samples], dtype=torch.float32)
+    """Convert DrivingSample objects into tensors and text prompts.
+
+    images shape: [B, NUM_CAMERAS, NUM_FRAMES, C, H, W]
+      - Falls back to single-camera (shape [B, 1, 1, C, H, W]) when lateral /
+        temporal fields are absent (old-format data).
+    future_waypoints_ego shape: [B, T, 3]  (Δx, Δy, Δθ)
+      - If loaded data has [T, 2] rows, Δθ is zero-padded.
+    """
+    # ── images ─────────────────────────────────────────────────────────────
+    images = _build_image_tensor(samples, image_size)
+
+    # ── ego state ───────────────────────────────────────────────────────────
+    speeds = torch.tensor(
+        [s.observation.ego_speed_mps for s in samples], dtype=torch.float32
+    )
+    accels = torch.tensor(
+        [s.observation.ego_accel_mps2 or 0.0 for s in samples], dtype=torch.float32
+    )
+
+    # ── waypoints [B, T, 3] ─────────────────────────────────────────────────
+    waypoints = _build_waypoint_tensor(samples)
+
+    # ── controls ────────────────────────────────────────────────────────────
     controls = torch.tensor(
         [
             [
-                sample.target.steer if sample.target.steer is not None else 0.0,
-                sample.target.throttle if sample.target.throttle is not None else 0.0,
-                sample.target.brake if sample.target.brake is not None else 0.0,
+                s.target.steer if s.target.steer is not None else 0.0,
+                s.target.throttle if s.target.throttle is not None else 0.0,
+                s.target.brake if s.target.brake is not None else 0.0,
             ]
-            for sample in samples
+            for s in samples
         ],
         dtype=torch.float32,
     )
-    route_commands = [sample.observation.route_command for sample in samples]
+
+    route_commands = [s.observation.route_command for s in samples]
     prompts = [
-        _build_prompt(command=sample.observation.route_command, speed_mps=sample.observation.ego_speed_mps)
-        for sample in samples
+        _build_prompt(s.observation.route_command, s.observation.ego_speed_mps)
+        for s in samples
     ]
+
     reasoning_targets = [
         _reasoning_target(
-            command=sample.observation.route_command,
-            speed_mps=sample.observation.ego_speed_mps,
-            explicit=sample.target.reasoning,
+            command=s.observation.route_command,
+            speed_mps=s.observation.ego_speed_mps,
+            explicit=s.target.reasoning,
             mode=reasoning_mode,
         )
-        for sample in samples
+        for s in samples
     ]
     reasoning_labels = torch.tensor(
-        [_reasoning_label_id(target, mode=reasoning_mode) for target in reasoning_targets],
+        [_reasoning_label_id(t, mode=reasoning_mode) for t in reasoning_targets],
         dtype=torch.long,
     )
-    sample_ids = [sample.observation.sample_id for sample in samples]
 
-    image_paths = [str(sample.observation.camera_front) for sample in samples]
+    # image_paths: list of current-front paths (for VLMBackbone backward compat)
+    image_paths = [str(s.observation.camera_front) for s in samples]
+    # all_image_paths: list of lists — 12 paths per sample (3 cam × 4 frame)
+    all_image_paths = _build_all_image_paths(samples)
 
     return {
-        "sample_ids": sample_ids,
+        "sample_ids": [s.observation.sample_id for s in samples],
         "image_paths": image_paths,
+        "all_image_paths": all_image_paths,
         "images": images,
         "ego_speed_mps": speeds,
+        "ego_accel_mps2": accels,
         "route_commands": route_commands,
         "prompts": prompts,
         "reasoning_mode": reasoning_mode,
@@ -75,10 +113,55 @@ def driving_collate_fn(samples, image_size: int | None = None, reasoning_mode: s
     }
 
 
+# ─────────────────────────── helpers ─────────────────────────────────────────
+
+def _build_image_tensor(samples, image_size: int | None) -> torch.Tensor:
+    """Build [B, C, NUM_CAMERAS, NUM_FRAMES, H, W] → stored as [B, NUM_CAMERAS, NUM_FRAMES, C, H, W]."""
+    batch = []
+    for s in samples:
+        cam_tensors = []
+        obs = s.observation
+        for cam_row in _CAM_KEYS:
+            frame_tensors = []
+            for key in cam_row:
+                path: Path | None = getattr(obs, key, None)
+                if path is None:
+                    # fall back: repeat the front-current frame to fill missing slots
+                    path = obs.camera_front
+                frame_tensors.append(load_image_tensor(path, image_size=image_size))
+            cam_tensors.append(torch.stack(frame_tensors, dim=0))  # [NUM_FRAMES, C, H, W]
+        batch.append(torch.stack(cam_tensors, dim=0))              # [NUM_CAMERAS, NUM_FRAMES, C, H, W]
+    return torch.stack(batch, dim=0)                               # [B, NUM_CAMERAS, NUM_FRAMES, C, H, W]
+
+
+def _build_waypoint_tensor(samples) -> torch.Tensor:
+    """[B, T, 3] — zero-pad Δθ if data only has 2D rows."""
+    rows = []
+    for s in samples:
+        wps = s.target.future_waypoints_ego
+        if wps and len(wps[0]) == 2:
+            wps = [[r[0], r[1], 0.0] for r in wps]
+        rows.append(wps)
+    return torch.tensor(rows, dtype=torch.float32)
+
+
+def _build_all_image_paths(samples) -> list[list[str]]:
+    """12 image paths per sample in camera-major order."""
+    result = []
+    for s in samples:
+        obs = s.observation
+        paths = []
+        for cam_row in _CAM_KEYS:
+            for key in cam_row:
+                p: Path | None = getattr(obs, key, None)
+                paths.append(str(p if p is not None else obs.camera_front))
+        result.append(paths)
+    return result
+
+
 def _build_prompt(command: str, speed_mps: float) -> str:
     return "Drive with command=%s at speed=%.2f m/s and predict future ego-frame waypoints." % (
-        command,
-        speed_mps,
+        command, speed_mps,
     )
 
 
@@ -90,7 +173,9 @@ def reasoning_label_count(mode: str) -> int:
     raise ValueError(f"Unsupported reasoning_mode: {mode}")
 
 
-def _reasoning_target(command: str, speed_mps: float, explicit: str | None = None, mode: str = "fast") -> str:
+def _reasoning_target(
+    command: str, speed_mps: float, explicit: str | None = None, mode: str = "fast"
+) -> str:
     if explicit:
         return explicit
     if mode == "slow":
@@ -116,9 +201,7 @@ def _reasoning_label_id(target: str, mode: str = "fast") -> int:
     if mode == "slow":
         if normalized in SLOW_REASONING_LABEL_TO_ID:
             return SLOW_REASONING_LABEL_TO_ID[normalized]
-        speed_suffix = "slow" if (
-            "slow" in normalized or "stop" in normalized or "brake" in normalized
-        ) else "cruise"
+        speed_suffix = "slow" if any(w in normalized for w in ("slow", "stop", "brake")) else "cruise"
         if "left" in normalized:
             return SLOW_REASONING_LABEL_TO_ID[f"turn_left_{speed_suffix}"]
         if "right" in normalized:
@@ -132,6 +215,6 @@ def _reasoning_label_id(target: str, mode: str = "fast") -> int:
         return REASONING_LABEL_TO_ID["turn_left"]
     if "right" in normalized:
         return REASONING_LABEL_TO_ID["turn_right"]
-    if "slow" in normalized or "stop" in normalized or "brake" in normalized:
+    if any(w in normalized for w in ("slow", "stop", "brake")):
         return REASONING_LABEL_TO_ID["slow_or_stop"]
     return REASONING_LABEL_TO_ID["keep_lane"]

@@ -3,7 +3,7 @@ set -euo pipefail
 
 WINE_BIN="${WINE_BIN:-/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine}"
 BOTTLE="${CARLA_CROSSOVER_BOTTLE:-carla-rgb64}"
-REPORT_PATH="${REPORT_PATH:-/private/tmp/vla_drive_carla/closed_loop_report.json}"
+REPORT_PATH="${REPORT_PATH:-/Volumes/DATASET/vla_drive_carla/closed_loop_report.json}"
 
 PYTHONIOENCODING=utf-8 "$WINE_BIN" --bottle "$BOTTLE" --cx-app 'C:\Python37\python.exe' \
   scripts/eval_carla_closed_loop.py \

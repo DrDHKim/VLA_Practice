@@ -13,7 +13,7 @@ set -euo pipefail
 # - frozen_vlm: Qwen2.5-VL-3B frozen backbone + waypoint head
 # - lora_vlm: Qwen2.5-VL-3B LoRA + waypoint head
 STAGE=reasoning_aux
-METADATA_PATH=/private/tmp/vla_drive_carla/mac_scenes/metadata.jsonl
+METADATA_PATH=/Volumes/DATASET/vla_drive_carla/mac_scenes/metadata.jsonl
 CHECKPOINT_DIR=checkpoints/mac_vla
 LOG_DIR=outputs/logs/mac_vla
 

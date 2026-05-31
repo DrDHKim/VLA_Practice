@@ -54,7 +54,12 @@ class CarlaClient:
         self.client.set_timeout(float(self.settings.timeout_seconds))
 
         if self.settings.town:
-            self.world = self.client.load_world(self.settings.town)
+            current_world = self.client.get_world()
+            current_map = current_world.get_map().name  # e.g. "Carla/Maps/Town01"
+            if self.settings.town in current_map:
+                self.world = current_world
+            else:
+                self.world = self.client.load_world(self.settings.town)
         else:
             self.world = self.client.get_world()
 

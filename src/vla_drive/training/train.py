@@ -65,10 +65,15 @@ def train(args: argparse.Namespace) -> dict:
         model = build_reasoning_aux_policy(
             hidden_dim=args.hidden_dim,
             waypoint_count=args.waypoint_count,
+            waypoint_dim=args.waypoint_dim,
             num_reasoning_labels=args.num_reasoning_labels,
         ).to(device)
     elif args.stage == "dummy_overfit":
-        model = build_dummy_policy(hidden_dim=args.hidden_dim, waypoint_count=args.waypoint_count).to(device)
+        model = build_dummy_policy(
+            hidden_dim=args.hidden_dim,
+            waypoint_count=args.waypoint_count,
+            waypoint_dim=args.waypoint_dim,
+        ).to(device)
     elif args.stage == "frozen_vlm":
         model = build_vlm_policy(
             model_path=args.model_path,
@@ -76,6 +81,7 @@ def train(args: argparse.Namespace) -> dict:
             lora_rank=args.lora_rank,
             lora_alpha=args.lora_alpha,
             waypoint_count=args.waypoint_count,
+            waypoint_dim=args.waypoint_dim,
         ).to(device)
     elif args.stage == "lora_vlm":
         model = build_vlm_policy(
@@ -84,6 +90,7 @@ def train(args: argparse.Namespace) -> dict:
             lora_rank=args.lora_rank,
             lora_alpha=args.lora_alpha,
             waypoint_count=args.waypoint_count,
+            waypoint_dim=args.waypoint_dim,
         ).to(device)
     else:
         raise ValueError(f"Unsupported training stage: {args.stage}")
@@ -292,7 +299,7 @@ def parse_args() -> argparse.Namespace:
         default="dummy_overfit",
         choices=["dummy_overfit", "frozen_vlm", "lora_vlm", "action_token", "reasoning_aux"],
     )
-    parser.add_argument("--metadata-path", type=Path, default=Path("/private/tmp/vla_drive_carla/m1_smoke/metadata.jsonl"))
+    parser.add_argument("--metadata-path", type=Path, default=Path("/Volumes/DATASET/vla_drive_carla/m1_smoke/metadata.jsonl"))
     parser.add_argument("--checkpoint-dir", type=Path, default=Path("checkpoints/m4_dummy"))
     parser.add_argument("--log-dir", type=Path, default=Path("outputs/logs/m4_dummy"))
     parser.add_argument("--resume-from", type=Path, default=None)
@@ -302,7 +309,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--image-size", type=int, default=64)
-    parser.add_argument("--waypoint-count", type=int, default=8)
+    parser.add_argument("--waypoint-count", type=int, default=10)
+    parser.add_argument("--waypoint-dim", type=int, default=3)
     parser.add_argument("--hidden-dim", type=int, default=64)
     parser.add_argument("--max-samples", type=int, default=10)
     parser.add_argument("--lr", type=float, default=1e-3)

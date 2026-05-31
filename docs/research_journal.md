@@ -925,3 +925,80 @@ RuntimeError: time-out of 30000ms while waiting for the simulator
 - 이 상태에서는 `01_카를라실행.command`로 CARLA를 재시작한 뒤 `06_데이터수집.command`를 실행해야 한다.
 
 M10B 상태는 `[x]`로 추가했다.
+
+## 2026-05-31: 데이터 저장 경로 외장 볼륨으로 통일
+
+내장 Mac 디스크 용량 절약을 위해 CARLA 데이터 수집 경로를 모두 `/Volumes/DATASET/vla_drive_carla`로 변경했다. 239GB 외장 볼륨이 `/Volumes/DATASET`에 마운트되어 있다.
+
+변경 파일 (15개):
+
+- `launchers/06_데이터수집.command`: `OUTPUT_ROOT` 변경
+- `scripts/collect_carla_scenes.sh`, `eval_carla.sh`, `eval_open_loop.sh`, `run_mac_scale_sweep.sh`
+- `src/vla_drive/configs/carla_mac_dataset.yaml`, `carla_rgb_waypoint.yaml`
+- `src/vla_drive/configs/nuscenes_open_loop.yaml`
+- `scripts/eval_carla_closed_loop.py`, `prepare_nuscenes.py`
+- 기타 default metadata/output path가 하드코딩된 나머지 파일
+
+## 2026-05-31: CARLA 실행 및 연결 안정화
+
+### Kill 수정
+
+`01_카를라실행.command`의 KILL_EXISTING이 기존 CARLA 프로세스를 제대로 종료하지 못하는 문제를 수정했다.
+
+- `WINEPREFIX` + `wineserver -k`로 bottle 전체를 종료하는 방식으로 교체
+- `pkill -f "CarlaUE4"` / `pkill -f "carla-rgb64"` 패턴 보강
+
+### load_world() timeout 수정
+
+`carla_client.py`에서 `load_world("Town01")` 호출이 30000ms ~ 120000ms timeout을 일으키는 문제를 수정했다.
+
+근본 원인: CARLA는 map 리로드 중 RPC를 일시적으로 차단한다. port는 열려 있어도 요청이 응답을 받지 못했다.
+
+수정:
+- `01_카를라실행.command`와 `scripts/run_carla_mac_crossover.sh`에 `CARLA_MAP=/Game/Carla/Maps/Town01`을 전달해 CARLA가 Town01로 초기 로딩되도록 했다.
+- `carla_client.connect()`를 `get_world()` 우선으로 변경했다. 현재 map이 이미 Town01이면 `load_world()`를 호출하지 않는다.
+- warmup sleep을 120초로 연장했다.
+
+검증: CARLA를 Town01로 시작한 뒤 `get_world()` 경로로 연결 성공. 수집 정상 동작 확인.
+
+### 06 자동 CARLA 실행 추가
+
+`06_데이터수집.command` 실행 시 CARLA가 꺼져 있으면 `01_카를라실행.command`를 자동으로 실행한다. `nc -z` port 확인 후 실행 여부를 결정한다.
+
+## 2026-05-31: AutoVLA I/O 정렬 완료
+
+첫 번째 목표 모델 AutoVLA(Qwen2.5-VL-3B, 논문 P02)의 입출력 구조를 코드베이스 전체에 반영했다. 리소스 제약으로 줄여야 할 경우 우선순위 낮은 항목부터 줄이되, 처음부터 구조를 맞추는 원칙을 채택했다.
+
+**목표 모델 I/O 정의**:
+
+- 입력: 3 cameras (front 0°, front-left -60°, front-right +60°) × 4 temporal frames (t0, t-0.5s, t-1.0s, t-1.5s) = 12 images
+- 출력: T=10 future ego waypoints @ 0.5s intervals, (Δx, Δy, Δθ) in ego frame
+- Action token: K-means codebook on (Δx, Δy, Δθ) deltas; K=256 (Mac smoke), K=2048 (target)
+
+**구현 파일**:
+
+- `src/vla_drive/data/schemas.py`: `Observation`에 12개 temporal camera 필드 추가 (`camera_front_*_t1/t2/t3`)
+- `scripts/collect_carla_data.py`: 전면 재작성. 3 camera spawn, raw frame buffer, post-process로 T=10 ego-frame waypoints 생성. `_world_to_ego_delta()` 구현 (Δx, Δy, Δθ)
+- `src/vla_drive/data/collate.py`: `_CAM_KEYS` 3×4 layout 추가. images `[B, 3, 4, 3, H, W]`, waypoints `[B, T, 3]`, `all_image_paths` [B, 12]
+- `src/vla_drive/data/datasets.py`: 12개 camera 필드 읽기 지원
+- `src/vla_drive/models/action_tokenizer.py`: 3D codebook `(Δx, Δy, Δθ)`. `encode()`/`decode()` 모두 3D. `decode_xy()`로 2D 변환
+- `src/vla_drive/models/backbone_vlm.py`: `all_image_paths` [B, 12]를 받아 12개 PIL 이미지로 multi-image encode. 1장 single-image backward compat 유지
+- `src/vla_drive/models/waypoint_head.py`: `waypoint_dim` 파라미터 추가 (default=3)
+- `src/vla_drive/models/vla_policy.py`: 모든 builder에 `waypoint_dim=3` 기본값 적용
+- `src/vla_drive/training/train.py`: `--waypoint-dim` 인자 추가
+- `scripts/train_lora.sh`: `--waypoint-count`, `--waypoint-dim` 전달 추가
+- `src/vla_drive/configs/base.yaml`: `waypoint_count: 10`, `waypoint_dim: 3`, `waypoint_interval_s: 0.5`, `num_cameras: 3`, `num_frames: 4` 추가
+- `src/vla_drive/evaluation/open_loop_metrics.py`: ADE/FDE를 spatial `[..., :2]`만 사용하도록 수정 (Δθ는 단위가 달라 L2 norm에 포함하지 않음)
+
+**Unit test 갱신** (7개 수정, 17 passed):
+
+- `test_waypoint_head.py`, `test_vla_policy_m3.py`, `test_reasoning_aux.py`, `test_action_tokenizer.py`, `test_data_m2.py`에서 `(*, 2)` shape → `(*, 3)` 또는 이에 맞는 fixture 수정
+
+Smoke 검증:
+
+```text
+ALL OK: WaypointHead(T=10,dim=3)  DummyPolicy(B=2,T=10,3)  Tokenizer3D
+pytest: 17 passed
+```
+
+Mac smoke 단계에서는 3 camera 모두 front fallback을 사용하고, temporal history도 동일 frame을 반복하므로 추가 compute 없이 구조 정합성만 확인한다. 실제 3-camera 동기 수집은 CARLA collection에서 검증 예정.

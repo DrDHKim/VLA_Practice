@@ -21,7 +21,7 @@ STEER_GAIN=1.2
 SPEED_KP=0.35
 BRAKE_KP=0.25
 
-REPORT_PATH=/private/tmp/vla_drive_carla/closed_loop_report.json
+REPORT_PATH=/Volumes/DATASET/vla_drive_carla/closed_loop_report.json
 
 # ============================================================
 # 여기 아래는 보통 수정하지 않는다.

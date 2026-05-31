@@ -8,6 +8,7 @@ set -euo pipefail
 
 CARLA_PORT=2000
 CARLA_QUALITY=Epic
+CARLA_MAP=/Game/Carla/Maps/Town01
 KILL_EXISTING=1
 FORCE_LOW_SETTINGS=1
 FORCE_DX11=0
@@ -36,19 +37,31 @@ cd "$REPO_ROOT"
 
 if [[ "$KILL_EXISTING" == "1" ]]; then
   echo "Stopping existing CARLA processes..."
-  pkill -f "CarlaUE4.exe" 2>/dev/null || true
-  pkill -f "CARLA_0.9.15" 2>/dev/null || true
-  pkill -f "CrossOver/Bottles/$CARLA_CROSSOVER_BOTTLE" 2>/dev/null || true
 
+  BOTTLE_DIR="$HOME/Library/Application Support/CrossOver/Bottles/$CARLA_CROSSOVER_BOTTLE"
+  WINE_BIN="/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine"
+
+  # 1. wineserver -k 로 해당 bottle 전체 종료 (가장 확실)
+  if [[ -x "$WINE_BIN" && -d "$BOTTLE_DIR" ]]; then
+    WINEPREFIX="$BOTTLE_DIR" "$WINE_BIN" --bottle "$CARLA_CROSSOVER_BOTTLE" --cx-app wineserver -- -k 2>/dev/null || true
+    sleep 1
+  fi
+
+  # 2. 프로세스 이름 기반 fallback
+  pkill -f "CarlaUE4" 2>/dev/null || true
+  pkill -f "carla-rgb64" 2>/dev/null || true
+  pkill -f "CARLA_0.9" 2>/dev/null || true
+
+  # 3. 포트를 점유 중인 프로세스 종료
   if command -v lsof >/dev/null 2>&1; then
     PORT_PIDS="$(lsof -tiTCP:"$CARLA_PORT" -sTCP:LISTEN 2>/dev/null || true)"
     if [[ -n "$PORT_PIDS" ]]; then
-      echo "Stopping processes listening on port $CARLA_PORT: $PORT_PIDS"
+      echo "Stopping processes on port $CARLA_PORT: $PORT_PIDS"
       kill $PORT_PIDS 2>/dev/null || true
     fi
   fi
 
-  sleep 2
+  sleep 3
 fi
 
 if [[ "$FORCE_LOW_SETTINGS" == "1" ]]; then
@@ -129,11 +142,13 @@ echo
 
 if [[ "${#EXTRA_ARGS[@]}" -gt 0 ]]; then
   CARLA_PORT="$CARLA_PORT" CARLA_QUALITY="$CARLA_QUALITY" \
+  CARLA_MAP="$CARLA_MAP" \
   CARLA_CROSSOVER_BOTTLE="$CARLA_CROSSOVER_BOTTLE" \
   CARLA_SOURCE_WINE_PREFIX="$CARLA_SOURCE_WINE_PREFIX_EFFECTIVE" \
     "$REPO_ROOT/scripts/run_carla_mac_crossover.sh" "${EXTRA_ARGS[@]}"
 else
   CARLA_PORT="$CARLA_PORT" CARLA_QUALITY="$CARLA_QUALITY" \
+  CARLA_MAP="$CARLA_MAP" \
   CARLA_CROSSOVER_BOTTLE="$CARLA_CROSSOVER_BOTTLE" \
   CARLA_SOURCE_WINE_PREFIX="$CARLA_SOURCE_WINE_PREFIX_EFFECTIVE" \
     "$REPO_ROOT/scripts/run_carla_mac_crossover.sh"

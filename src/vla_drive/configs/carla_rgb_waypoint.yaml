@@ -3,7 +3,7 @@ defaults:
 
 data:
   dataset: carla
-  root: /private/tmp/vla_drive_carla/tiny
+  root: /Volumes/DATASET/vla_drive_carla/tiny
 
 simulation:
   host: 127.0.0.1
