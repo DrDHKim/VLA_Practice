@@ -9,8 +9,9 @@ from torch.utils.data import DataLoader, Subset
 
 from vla_drive.data.collate import driving_collate_fn
 from vla_drive.data.datasets import JsonlDrivingDataset
-from vla_drive.models.vla_policy import build_dummy_policy, build_vlm_policy
-from vla_drive.training.losses import waypoint_prediction_loss
+from vla_drive.models.action_tokenizer import TrajectoryActionTokenizer
+from vla_drive.models.vla_policy import build_action_token_policy, build_dummy_policy, build_vlm_policy
+from vla_drive.training.losses import action_token_loss, waypoint_prediction_loss
 from vla_drive.utils.io import ensure_dir
 from vla_drive.utils.logging import get_logger
 from vla_drive.utils.seed import seed_everything
@@ -46,7 +47,15 @@ def train(args: argparse.Namespace) -> dict:
     if len(loader) == 0:
         raise RuntimeError(f"No training samples found: {args.metadata_path}")
 
-    if args.stage == "dummy_overfit":
+    tokenizer: TrajectoryActionTokenizer | None = None
+    if args.stage == "action_token":
+        tokenizer = _load_or_fit_tokenizer(args, dataset)
+        model = build_action_token_policy(
+            num_tokens=args.num_action_tokens,
+            hidden_dim=args.hidden_dim,
+            waypoint_count=args.waypoint_count,
+        ).to(device)
+    elif args.stage == "dummy_overfit":
         model = build_dummy_policy(hidden_dim=args.hidden_dim, waypoint_count=args.waypoint_count).to(device)
     elif args.stage == "frozen_vlm":
         model = build_vlm_policy(
@@ -97,12 +106,15 @@ def train(args: argparse.Namespace) -> dict:
             for batch_index, batch in enumerate(loader):
                 batch = _move_batch(batch, device)
                 output = model(batch)
-                loss = waypoint_prediction_loss(
-                    output["future_waypoints_ego"],
-                    batch["future_waypoints_ego"],
-                    l1_weight=args.l1_weight,
-                    fde_weight=args.fde_weight,
-                )
+                if args.stage == "action_token" and tokenizer is not None:
+                    loss = _action_token_step_loss(output, batch, tokenizer, device)
+                else:
+                    loss = waypoint_prediction_loss(
+                        output["future_waypoints_ego"],
+                        batch["future_waypoints_ego"],
+                        l1_weight=args.l1_weight,
+                        fde_weight=args.fde_weight,
+                    )
                 (loss / args.grad_accum_steps).backward()
                 if (batch_index + 1) % args.grad_accum_steps == 0 or (batch_index + 1) == len(loader):
                     torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
@@ -177,6 +189,42 @@ def _save_checkpoint(
     )
 
 
+def _load_or_fit_tokenizer(args: argparse.Namespace, dataset) -> TrajectoryActionTokenizer:
+    """Load tokenizer from disk or fit on the dataset and save."""
+    tokenizer = TrajectoryActionTokenizer(num_tokens=args.num_action_tokens)
+    if args.tokenizer_path is not None and Path(args.tokenizer_path).exists():
+        tokenizer.load(args.tokenizer_path)
+        LOGGER.info("loaded tokenizer from %s (K=%d)", args.tokenizer_path, tokenizer.num_tokens)
+    else:
+        import numpy as np
+
+        LOGGER.info("fitting tokenizer on %d samples (K=%d)...", len(dataset), args.num_action_tokens)
+        trajectories = []
+        for sample in dataset:
+            trajectories.append(np.array(sample.target.future_waypoints_ego, dtype=np.float32))
+        tokenizer.fit(trajectories)
+        save_path = Path(args.checkpoint_dir) / "tokenizer.json"
+        tokenizer.save(save_path)
+        LOGGER.info("tokenizer fitted and saved to %s", save_path)
+    return tokenizer
+
+
+def _action_token_step_loss(
+    output: dict,
+    batch: dict,
+    tokenizer: TrajectoryActionTokenizer,
+    device: torch.device,
+) -> torch.Tensor:
+    """Encode batch waypoints with tokenizer and compute cross-entropy loss."""
+    import numpy as np
+
+    logits = output["action_logits"]              # [B, T, K]
+    waypoints_np = batch["future_waypoints_ego"].cpu().numpy()  # [B, T, 2]
+    token_targets = np.stack([tokenizer.encode(waypoints_np[b]) for b in range(waypoints_np.shape[0])])
+    targets = torch.tensor(token_targets, dtype=torch.long, device=device)
+    return action_token_loss(logits, targets)
+
+
 def _json_safe_args(args: argparse.Namespace) -> dict:
     safe = {}
     for key, value in vars(args).items():
@@ -189,7 +237,7 @@ def _json_safe_args(args: argparse.Namespace) -> dict:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train a tiny VLA waypoint policy.")
-    parser.add_argument("--stage", default="dummy_overfit", choices=["dummy_overfit", "frozen_vlm", "lora_vlm"])
+    parser.add_argument("--stage", default="dummy_overfit", choices=["dummy_overfit", "frozen_vlm", "lora_vlm", "action_token"])
     parser.add_argument("--metadata-path", type=Path, default=Path("/private/tmp/vla_drive_carla/m1_smoke/metadata.jsonl"))
     parser.add_argument("--checkpoint-dir", type=Path, default=Path("checkpoints/m4_dummy"))
     parser.add_argument("--log-dir", type=Path, default=Path("outputs/logs/m4_dummy"))
@@ -213,6 +261,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-path", type=str, default="data/offline/hf_models/Qwen2.5-VL-3B-Instruct")
     parser.add_argument("--lora-rank", type=int, default=8)
     parser.add_argument("--lora-alpha", type=int, default=16)
+    parser.add_argument("--num-action-tokens", type=int, default=256)
+    parser.add_argument("--tokenizer-path", type=Path, default=None)
     return parser.parse_args()
 
 

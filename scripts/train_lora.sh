@@ -20,7 +20,12 @@ ARGS=(
   --model-path "${MODEL_PATH:-data/offline/hf_models/Qwen2.5-VL-3B-Instruct}"
   --lora-rank "${LORA_RANK:-8}"
   --lora-alpha "${LORA_ALPHA:-16}"
+  --num-action-tokens "${NUM_ACTION_TOKENS:-256}"
 )
+
+if [[ -n "${TOKENIZER_PATH:-}" ]]; then
+  ARGS+=(--tokenizer-path "$TOKENIZER_PATH")
+fi
 
 if [[ -n "${RESUME_FROM:-}" ]]; then
   ARGS+=(--resume-from "$RESUME_FROM")

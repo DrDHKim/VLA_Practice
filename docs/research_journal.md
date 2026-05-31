@@ -339,8 +339,41 @@ pytest slow 포함 전체 통과:
 - Phase A 논문 노트 작성 `[x]`
 - Phase B Real VLM Backbone `[x]`
 
+## 2026-05-31: Phase C — Action Tokenizer 구현 완료
+
+AutoVLA 방식의 이산 action token 학습 pipeline을 구현하고 MacBook CPU smoke run까지 검증했다.
+
+구현 파일:
+
+- `src/vla_drive/models/action_tokenizer.py`: `TrajectoryActionTokenizer` 구현. `fit()`: K-means on (∆x, ∆y) deltas, `encode()`: nearest codebook entry per step → [T] int indices, `decode()`: codebook lookup + cumsum → [T, 2] abs positions. `save()`/`load()` JSON persistence
+- `src/vla_drive/models/action_token_head.py`: `ActionTokenHead(hidden_dim, T, K)` → [B, T, K] logits
+- `src/vla_drive/training/losses.py`: `action_token_loss()` 추가 (cross-entropy, [B,T,K] logits vs [B,T] targets)
+- `src/vla_drive/models/vla_policy.py`: `ActionTokenPolicy`, `build_action_token_policy()`, `build_vlm_action_token_policy()` 추가. `decode_waypoints()` — greedy argmax → tokenizer.decode → [B,T,2]
+- `src/vla_drive/training/train.py`: `action_token` stage 추가. `_load_or_fit_tokenizer()` (학습 데이터로 fit 후 저장), `_action_token_step_loss()` helper. `--num-action-tokens`, `--tokenizer-path` 인자 추가
+- `scripts/train_lora.sh`: `NUM_ACTION_TOKENS`, `TOKENIZER_PATH` 지원 추가
+- `tests/unit/test_action_tokenizer.py`: 5개 단위 테스트 추가
+
+실제 검증:
+
+```
+action_token smoke (5 epochs, 20 samples, K=64, MPS):
+  tokenizer fitted and saved
+  initial_loss=4.21 → final_loss=3.43 (loss_decreased=true)
+  TRAINING_OK
+```
+
+pytest 전체 (not slow):
+```
+12 passed
+```
+
+주의:
+- K > n_samples 에러 방어 로직 추가 (자동으로 K를 min(K, n_samples)으로 캡)
+- CARLA tiny smoke (300 samples)에서 K=256 사용 시 충분한 샘플 확보됨
+- `decode_waypoints()`가 [B,T,2]를 반환하므로 regression metric과 직접 비교 가능
+
 다음 작업:
 
-1. Phase C: M7 Action Tokenizer 구현 (K-disk clustering, K=256 시작, cross-entropy loss)
+1. Phase D: reasoning auxiliary loss 또는 CARLA data 규모 확장 후 RTX 5090으로 전환
 2. MacBook에서는 tiny route와 CPU/MPS-safe mode만 유지한다.
 3. RTX 5090 확장 전까지 같은 code path에서 반복 검증한다.

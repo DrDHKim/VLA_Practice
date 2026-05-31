@@ -225,7 +225,7 @@
 
 ## M7: Research Extensions
 
-상태: `[ ]`
+상태: `[~]`
 
 파일:
 
