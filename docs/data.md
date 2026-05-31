@@ -91,6 +91,37 @@ data/processed/carla/
 
 schema가 안정되기 전에는 복잡한 binary format을 설계하지 않는다.
 
+현재 JSONL record는 `DrivingSample`에 직접 대응한다.
+
+```json
+{
+  "observation": {
+    "sample_id": "carla_000000",
+    "timestamp": 0.0,
+    "camera_front": "/private/tmp/vla_drive_carla/m1_smoke/images/frame_00000.png",
+    "route_command": "lane_follow",
+    "ego_speed_mps": 4.35
+  },
+  "target": {
+    "future_waypoints_ego": [[1.0, 0.0], [2.0, 0.0]],
+    "steer": 0.0,
+    "throttle": 0.2,
+    "brake": 0.0
+  }
+}
+```
+
+Path rule:
+
+- absolute image path는 그대로 사용한다.
+- relative image path는 `metadata.jsonl`이 있는 directory 기준으로 resolve한다.
+- CrossOver/Wine에서 수집할 때 `Z:\...` image path는 POSIX `/...` path로 기록한다.
+
+Batch rule:
+
+- `driving_collate_fn`은 `images: float32[B, 3, H, W]`, `future_waypoints_ego: float32[B, T, 2]`, `controls: float32[B, 3]`를 만든다.
+- prompt는 route command와 ego speed를 포함한 짧은 driving instruction으로 만든다.
+
 ## Split Rule
 
 frame 단위 random split은 거의 같은 observation을 train/test에 동시에 넣을 수 있다. split은 route 또는 scene 단위로 나눈다.

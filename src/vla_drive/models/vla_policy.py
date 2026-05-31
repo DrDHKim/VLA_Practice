@@ -15,3 +15,12 @@ class VLADrivingPolicy(nn.Module):
         hidden = self.backbone.encode(batch)
         return {"future_waypoints_ego": self.waypoint_head(hidden)}
 
+
+def build_dummy_policy(hidden_dim: int = 64, waypoint_count: int = 8) -> VLADrivingPolicy:
+    from vla_drive.models.backbone_vlm import DummyDrivingBackbone
+
+    return VLADrivingPolicy(
+        backbone=DummyDrivingBackbone(hidden_dim=hidden_dim),
+        hidden_dim=hidden_dim,
+        waypoint_count=waypoint_count,
+    )

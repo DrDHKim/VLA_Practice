@@ -6,26 +6,26 @@ data:
   root: data/processed
   batch_size: 1
   num_workers: 4
-  image_size: 448
+  image_size: 64
   waypoint_count: 8
   waypoint_interval_s: 0.5
 
 model:
-  backbone_name: Qwen/Qwen2.5-VL-3B-Instruct
+  backbone_name: dummy
   freeze_backbone: true
-  use_lora: true
+  use_lora: false
   lora_rank: 8
   lora_alpha: 16
-  hidden_dim: 1024
+  hidden_dim: 64
 
 training:
-  epochs: 5
-  lr: 0.0001
-  weight_decay: 0.01
-  grad_accum_steps: 8
+  epochs: 20
+  lr: 0.001
+  weight_decay: 0.0
+  grad_accum_steps: 1
   max_grad_norm: 1.0
-  log_every: 20
-  save_every: 1000
+  log_every: 5
+  save_every: 1
 
 evaluation:
   output_dir: outputs/reports

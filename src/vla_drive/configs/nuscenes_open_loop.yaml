@@ -2,7 +2,12 @@ defaults:
   - base
 
 data:
-  dataset: nuscenes
-  root: data/processed/nuscenes
-  version: v1.0-mini
+  dataset: carla
+  metadata_path: /private/tmp/vla_drive_carla/m1_smoke/metadata.jsonl
+  version: tiny-smoke
 
+evaluation:
+  checkpoint_path: checkpoints/m4_dummy/latest.pt
+  report_path: outputs/reports/open_loop_m4_dummy.json
+  batch_size: 4
+  image_size: 64

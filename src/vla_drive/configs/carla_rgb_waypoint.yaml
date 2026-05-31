@@ -3,12 +3,26 @@ defaults:
 
 data:
   dataset: carla
-  root: data/processed/carla
+  root: /private/tmp/vla_drive_carla/tiny
 
 simulation:
   host: 127.0.0.1
   port: 2000
   town: Town01
   weather: ClearNoon
+  timeout_seconds: 30.0
+  synchronous_mode: false
   fixed_delta_seconds: 0.05
 
+collection:
+  seconds: 30.0
+  fps: 10.0
+  warmup_seconds: 2.0
+  image_width: 640
+  image_height: 360
+  fov: 90.0
+  vehicle_filter: vehicle.tesla.model3
+  target_speed_mps: 5.0
+  route_length: 80
+  waypoint_spacing_m: 2.0
+  future_waypoint_count: 8

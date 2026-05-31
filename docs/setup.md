@@ -42,7 +42,7 @@ MacBook tiny run -> RTX 5090 medium run -> AIP/H100 large run
 
 | 환경 | 역할 | 주요 용도 | 피할 것 |
 | --- | --- | --- | --- |
-| MacBook | small end-to-end pilot | CARLA smoke data collection, tiny/small training, small evaluation, 문서화, code editing, unit test | 장시간 training, 대규모 route sweep |
+| MacBook | end-to-end pilot + 중간 규모 inference | CARLA smoke data collection, training (3B/7B LoRA), open/closed-loop evaluation, 문서화, code editing, unit test | 장시간 대규모 route sweep, 10B full fine-tuning |
 | Desktop RTX 5090 | medium-scale execution | 더 큰 CARLA collection, LoRA/QLoRA, 반복 training/evaluation | 10B full fine-tuning |
 | Company AIP/H100 x2 | final scale-up | large LoRA, multi-dataset training, ablation | 초기 탐색 |
 
@@ -59,9 +59,92 @@ MacBook 규칙:
 
 - `data/offline`은 120GB 아래로 유지한다.
 - 아래 Bundle A를 우선한다.
-- CARLA도 MacBook pilot path에 포함된다. 먼저 짧은 route, 낮은 traffic, 낮은 resolution, 짧은 evaluation job으로 실행한다.
+- CARLA도 MacBook pilot path에 포함된다. 공식 지원 경로는 Linux/Windows server 또는 remote host지만, 이 Mac에서는 CrossOver 64-bit bottle + D3DMetal로 Windows CARLA 0.9.15 server 실행, `127.0.0.1:2000` port open, RGB camera frame까지 검증했다. 재현 절차는 `docs/carla_mac_setup.md`를 따른다.
 - 충분한 용량을 확인하기 전에는 Mac에서 큰 CARLA/dataset archive를 풀지 않는다.
 - user home cache에 쓸 수 없을 때는 matplotlib을 import하는 script 실행 시 `MPLCONFIGDIR=.matplotlib_cache`를 설정한다.
+
+MacBook readiness check:
+
+```bash
+.conda/bin/python scripts/check_mac_readiness.py
+```
+
+현재 이 Mac 기준으로 주의할 점:
+
+- disk: 현재 여유 공간은 약 130GiB이고 `data/offline`은 약 84GiB다. 120GB offline budget 안쪽이지만, CARLA log/checkpoint를 고려해 최소 40GiB free space를 유지한다.
+- Python: project-local `.conda`는 Python 3.10.19이며 현재 표준과 일치한다.
+- system tools: 현재 `git-lfs`, `ffmpeg`, `cmake`가 PATH에 없다. offline coding 자체는 가능하지만 dataset/repo LFS 처리, video export, native build fallback에는 필요하다.
+- torch/MPS: 현재 process에서는 `torch.backends.mps.is_available()`가 false다. 이 상태에서는 MacBook training/evaluation을 CPU smoke mode로 먼저 통과시키고, local Terminal에서 MPS가 true로 확인될 때만 MPS path를 켠다.
+- CARLA: Mac local server는 `docs/carla_mac_setup.md`의 CrossOver/D3DMetal path로 RGB camera까지 검증했다. `carla` Python package는 macOS native process에서 import하지 않고 CrossOver bottle 내부 Windows Python 3.7과 CARLA egg를 사용한다.
+- bitsandbytes: Mac에서는 CUDA quantization 경로로 쓰지 않는다. MacBook은 frozen backbone, CPU/MPS-safe mode, 작은 batch로만 검증한다.
+
+MacBook 문제별 해결책:
+
+| 문제 | 증상 | 해결 |
+| --- | --- | --- |
+| `git-lfs` 없음 | 외부 repo나 dataset pointer만 받고 실제 파일이 없음 | `brew install git-lfs && git lfs install`을 online에서 실행한다. offline 환경이면 LFS object까지 포함된 archive를 미리 받는다. |
+| `ffmpeg` 없음 | episode video export 또는 debug clip 생성 실패 | `brew install ffmpeg`를 online에서 실행한다. 필수 구현은 image sequence/JSONL만으로 먼저 진행한다. |
+| `cmake` 없음 | wheel 없는 native package build 실패 | `brew install cmake`를 online에서 실행한다. 기본 작업은 pinned wheelhouse만 사용하므로 당장 blocking은 아니다. |
+| MPS unavailable | torch는 설치됐지만 MPS가 false | CPU smoke mode를 기본값으로 사용한다. training config는 `device: auto` 대신 `cpu` fallback을 허용한다. |
+| CARLA server/runtime 문제 | simulator 실행 불가 또는 `import carla` 실패 | Mac local server는 `docs/carla_mac_setup.md`로 재설치한다. Mac native Python 대신 CrossOver bottle 내부 Windows Python 3.7을 사용한다. |
+| disk pressure | free space 40GiB 미만 또는 offline cache 120GB 초과 | Qwen 7B/LLaVA/NAVSIM baseline 같은 P4 선택 asset부터 제거하고 `scripts/check_offline_budget.sh`를 실행한다. |
+| matplotlib cache permission | plot/eval script에서 cache 경고 또는 실패 | `MPLCONFIGDIR=.matplotlib_cache`를 붙여 실행한다. |
+| offline wheel 누락 | offline pip install 실패 | online 환경에서 `requirements.offline.txt` 기준으로 `macos-py310-pinned` wheelhouse를 다시 만든다. |
+
+추가 설치/다운로드 판단:
+
+| 우선순위 | 항목 | 현재 상태 | 조치 |
+| ---: | --- | --- | --- |
+| P0 | Mac Python wheelhouse | 준비됨, `pip check` 통과 | 추가 다운로드 불필요 |
+| P0 | Qwen2.5-VL-3B | 준비됨 | 추가 다운로드 불필요 |
+| P1 | `git-lfs` | 미설치 | online일 때 Homebrew로 설치 |
+| P1 | `ffmpeg` | 미설치 | video export가 필요해지기 전에 설치 |
+| P2 | CARLA base runtime | Mac local server와 RGB camera 검증됨 | `docs/carla_mac_setup.md`와 `scripts/run_carla_mac_crossover.sh` 사용 |
+| P2 | CARLA Python client import path | macOS native `carla` import는 사용하지 않음 | CrossOver bottle 내부 Windows Python 3.7과 CARLA egg를 사용한다. |
+| P3 | nuScenes mini/maps/CAN bus | 준비됨 | 추가 다운로드 불필요 |
+| P3 | Bench2Drive Mini | 준비됨 | 추가 다운로드 불필요 |
+| P4 | Qwen 7B/LLaVA/NAVSIM baselines | 준비됨 | 120GB 초과 전까지 유지, Mac에서 느리면 reference-only로 둔다. |
+
+### Mac에서 CARLA 직접 실행
+
+공식 문서 기준으로 CARLA server는 Linux/Windows가 지원 대상이다. 다만 이 Mac에서는 CrossOver 64-bit bottle + D3DMetal로 Windows CARLA 0.9.15 server 실행, RPC port open, RGB camera frame까지 확인했다. 설치 절차는 `docs/carla_mac_setup.md`, 실행은 `scripts/run_carla_mac_crossover.sh`를 따른다.
+
+Option A, 안정 경로:
+
+```text
+MacBook Python client -> remote CARLA server on Linux/Windows/RTX 5090
+```
+
+장점: official CARLA path와 가장 가깝고, ROS/Bench2Drive/NAVSIM 확장도 쉽다.
+
+Option B, Mac 단독 experimental path:
+
+```text
+CrossOver 64-bit bottle + D3DMetal -> WindowsNoEditor/CarlaUE4.exe -> bottle 내부 PythonAPI
+```
+
+필요 항목:
+
+- CrossOver 26.x
+- Windows CARLA release archive, 예: `WindowsNoEditor`
+- 64-bit bottle: `carla-rgb64`
+- D3DMetal enabled
+- Windows Python 3.7 x64 for CARLA 0.9.15 Windows PythonAPI egg
+- 실행 flag: `-quality-level=Epic`, `-windowed`, `-carla-rpc-port=2000`
+
+주의:
+
+- community PDF 기준 M4/24GB에서는 CARLA 0.9.15가 동작한 사례가 있고, M1 Pro/16GB에서는 0.9.15+ rendering 실패 사례가 있다.
+- 같은 discussion에서 ROS는 Wine 내부에서 잘 안 맞는다고 보고되어 있다. ROS가 필요하면 remote Linux server가 더 낫다.
+- Python client를 macOS native process에서 바로 쓰지 않는다. CrossOver bottle 내부 Python을 사용한다.
+- 이 경로는 reproducibility가 낮으므로 RTX 5090/AIP에서는 Linux/Windows official path를 계속 우선한다.
+
+참고:
+
+- CARLA official build docs: https://carla.readthedocs.io/en/0.9.15/build_carla/
+- CARLA macOS maintainer comment: https://github.com/carla-simulator/carla/discussions/8563
+- Apple Silicon Kegworks/Wine workaround: https://github.com/carla-simulator/carla/discussions/9037
+- Community PDF: https://github.com/user-attachments/files/21182231/CARLA.Server.on.Apple.Silicon.Mac.pdf
 
 ## RTX 5090 Setup
 
@@ -188,14 +271,15 @@ data/offline/
 | 순서 | 항목 | 예상 용량 | 이유 |
 | ---: | --- | ---: | --- |
 | 2.1 | Qwen2.5-VL-3B-Instruct | 7-10GB | 첫 VLA backbone |
-| 2.2 | target machine용 CARLA runtime | 상황별 다름 | MacBook smoke, RTX 5090 medium, AIP/H100 large run의 첫 closed-loop simulator |
+| 2.2 | target server용 CARLA runtime | Mac local 약 25-35GB | MacBook client smoke, RTX 5090 medium, AIP/H100 large run의 첫 closed-loop simulator |
 | 2.3 | CARLA PythonAPI wheel/client package | 포함 또는 소용량 | Python script가 CARLA server와 통신하기 위해 필요 |
 
 CARLA note:
 
 - MacBook, RTX 5090, AIP/H100은 모두 같은 pipeline에서 CARLA를 사용한다.
-- Linux 전용 CARLA runtime은 desktop으로 옮길 목적이 명확할 때만 Mac에 저장한다.
-- 현재 Mac offline cache에는 CARLA AdditionalMaps만 있고, 검증된 Mac CARLA runtime은 없다.
+- MacBook은 CARLA client/control/data schema smoke run을 맡고, local CrossOver/D3DMetal server 또는 Linux/Windows remote server에 연결한다.
+- Linux 전용 CARLA runtime은 desktop/server로 옮길 목적이 명확할 때만 Mac에 저장한다.
+- 현재 Mac offline cache에는 Windows CARLA 0.9.15 runtime과 AdditionalMaps가 있고, local Wine server는 port open까지 검증했다.
 
 ### P3: 작은 dataset
 
@@ -207,17 +291,16 @@ CARLA note:
 | 3.2 | Bench2Drive Mini | 약 4GB | benchmark format inspection |
 | 3.3 | nuScenes maps/CAN bus small expansion | 1-5GB estimate | conversion/debug 편의 |
 
-### P4: 120GB 안에서 가능한 추가 baseline
+### P4: Mac에서 사용하는 추가 baseline (준비 완료)
 
-예상 누적 용량: 선택에 따라 75-115GB.
-
-| 순서 | 항목 | 예상 용량 | 이유 |
+| 순서 | 항목 | 예상 용량 | 상태 |
 | ---: | --- | ---: | --- |
-| 4.1 | Qwen2.5-VL-7B-Instruct | 15-20GB | 두 번째 VLA baseline |
-| 4.2 | LLaVA-OneVision Qwen2 7B 또는 NAVSIM baselines 중 선택 | 2-20GB | alternative baseline/reference |
-| 4.3 | CARLA AdditionalMaps | 10-20GB estimate | route/weather/map 다양성 |
+| 4.1 | Qwen2.5-VL-7B-Instruct | 15GB | 준비됨, Mac에서 LoRA 실행 예정 |
+| 4.2 | LLaVA-OneVision Qwen2 7B | 15GB | 준비됨, Mac에서 inference/LoRA 실행 예정 |
+| 4.3 | NAVSIM baselines | 3.8GB | 준비됨 |
+| 4.4 | CARLA AdditionalMaps | 6.9GB | 준비됨 (tar.gz) |
 
-규칙: P4 항목은 하나씩 추가하고 매번 `./scripts/check_offline_budget.sh`를 실행한다.
+note: Qwen2.5-VL-7B, LLaVA-7B는 Mac에서 LoRA/QLoRA로 실행하기로 결정했다. 10B full fine-tuning은 여전히 금지.
 
 ### P5: Mac에 받지 말 것
 
@@ -240,7 +323,7 @@ repo clones
 Mac Python 3.10 Miniconda installer
 Mac Python 3.10 wheelhouse
 Qwen2.5-VL-3B
-CARLA runtime/client path for MacBook smoke run
+CARLA client package/PYTHONPATH for MacBook smoke run
 nuScenes mini
 Bench2Drive Mini
 ```

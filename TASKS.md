@@ -13,6 +13,8 @@
 - AIP/H100은 MacBook과 RTX 5090에서 data collection, training, evaluation loop가 검증된 뒤에만 사용할 것.
 - 10B급 model full fine-tuning은 금지. LoRA/QLoRA만 허용.
 - 작업을 끝내면 완료 기준을 실제로 확인하고 상태를 바꿀 것.
+- MacBook 작업 시작 전 `.conda/bin/python scripts/check_mac_readiness.py`를 실행하고, `[FAIL]`이 있으면 먼저 해결할 것.
+- CARLA server는 Mac 공식 지원을 전제하지 말 것. 이 Mac에서는 CrossOver 64-bit bottle + D3DMetal + Windows CARLA 0.9.15로 RGB camera frame과 `127.0.0.1:2000` port open까지 검증했지만, 불안정하면 Linux/Windows host 또는 remote-run 방식으로 전환할 것.
 
 ## 상태 표시
 
@@ -30,12 +32,13 @@
 - P0-P4 offline asset은 `data/offline/`에 준비됨.
 - 일반 MacBook offline 작업은 `data/offline/wheels/macos-py310-pinned`를 사용함.
 - 세부 목록과 용량 정책은 `docs/setup.md`를 기준으로 확인할 것.
+- 현재 MacBook readiness에서 CARLA server runtime은 준비됐지만, macOS native `carla` PythonAPI와 MPS availability는 주의 대상이다. 자세한 해결책은 `docs/setup.md`와 `docs/carla_mac_setup.md`를 따른다.
 
 다음 구현 대상: `M1: CARLA Connection`
 
 ## M1: CARLA Connection
 
-상태: `[ ]`
+상태: `[x]`
 
 파일:
 
@@ -43,33 +46,36 @@
 - `src/vla_drive/simulation/carla_agent.py`
 - `src/vla_drive/simulation/route_planner.py`
 - `src/vla_drive/simulation/pid_controller.py`
+- `src/vla_drive/utils/io.py`
 - `scripts/collect_carla_data.py`
 - `src/vla_drive/configs/carla_rgb_waypoint.yaml`
 
 목표:
 
-- MacBook tiny smoke run부터 CARLA 서버에 연결하고, 차량과 센서를 spawn하고, rule-based route를 따라 주행하며 데이터를 저장할 준비를 한다.
+- MacBook tiny smoke run부터 CARLA 서버에 연결하고, 차량과 센서를 spawn하고, rule-based route를 따라 주행하며 데이터를 저장할 준비를 한다. CARLA server는 `scripts/run_carla_mac_crossover.sh`로 켠 local CrossOver/D3DMetal server를 우선 사용하되, 같은 config로 remote Linux/Windows host도 허용한다.
 - 같은 코드는 이후 RTX 5090과 AIP/H100에서 규모만 키워 재사용한다.
 
 단계:
 
 1. `CarlaClient.connect()`를 구현한다.
 2. synchronous mode와 fixed delta seconds 설정을 구현한다.
-3. actor cleanup 로직을 구현한다.
-4. RGB front camera sensor callback을 구현한다.
-5. `PIDWaypointController.control()`을 구현한다.
-6. `scripts/collect_carla_data.py`에서 짧은 route 1개를 실행한다.
+3. `RoutePlanner`에서 짧은 route와 local waypoint/high-level command를 만든다.
+4. actor cleanup 로직을 구현한다.
+5. RGB front camera sensor callback을 구현한다.
+6. `PIDWaypointController.control()`을 구현한다.
+7. `scripts/collect_carla_data.py`에서 짧은 route 1개를 실행하고 JSONL/images를 저장한다.
 
 완료 기준:
 
-- MacBook에서 CARLA 서버가 켜져 있을 때 Python script가 world name을 출력한다.
+- MacBook에서 local 또는 remote CARLA 서버가 켜져 있을 때 Python script가 world name을 출력한다.
 - ego vehicle과 RGB camera가 spawn된다.
 - 30초 이상 crash 없이 tick이 진행된다.
 - 최소 10개 frame의 observation metadata를 저장한다.
+- `src/vla_drive/configs/carla_rgb_waypoint.yaml`만 바꿔 route와 저장 위치를 조정할 수 있다.
 
 ## M2: Common Data Schema
 
-상태: `[ ]`
+상태: `[x]`
 
 파일:
 
@@ -77,6 +83,7 @@
 - `src/vla_drive/data/datasets.py`
 - `src/vla_drive/data/collate.py`
 - `src/vla_drive/data/transforms.py`
+- `src/vla_drive/utils/io.py`
 - `docs/data.md`
 
 목표:
@@ -86,10 +93,11 @@
 단계:
 
 1. `Observation`, `ActionTarget`, `DrivingSample` 필드가 실제 저장 JSONL과 일치하는지 확인한다.
-2. `JsonlDrivingDataset`에 상대 경로/절대 경로 처리를 추가한다.
-3. image loading transform을 구현한다.
-4. `driving_collate_fn`에서 batch tensor와 prompt를 만든다.
-5. 작은 fixture JSONL로 unit test를 추가한다.
+2. JSONL read/write helper와 image path helper를 `utils/io.py`에 추가한다.
+3. `JsonlDrivingDataset`에 상대 경로/절대 경로 처리를 추가한다.
+4. image loading transform을 구현한다.
+5. `driving_collate_fn`에서 batch tensor와 prompt를 만든다.
+6. 작은 fixture JSONL로 unit test를 추가한다.
 
 완료 기준:
 
@@ -99,7 +107,7 @@
 
 ## M3: Baseline VLA Policy
 
-상태: `[ ]`
+상태: `[x]`
 
 파일:
 
@@ -118,8 +126,9 @@
 
 1. 먼저 dummy backbone으로 `VLADrivingPolicy` forward path를 통과시킨다.
 2. `WaypointHead`가 `[B, T, 2]`를 출력하는지 확인한다.
-3. waypoint L1 loss와 FDE loss를 합친 loss 함수를 만든다.
-4. Qwen2.5-VL 또는 LLaVA wrapper는 dummy baseline이 통과한 뒤 붙인다.
+3. `VLADrivingPolicy`가 backbone output과 waypoint head를 연결하게 한다.
+4. waypoint L1 loss와 FDE loss를 합친 loss 함수를 만든다.
+5. Qwen2.5-VL 또는 LLaVA wrapper는 dummy baseline이 통과한 뒤 붙인다.
 
 완료 기준:
 
@@ -128,12 +137,14 @@
 
 ## M4: Training Loop
 
-상태: `[ ]`
+상태: `[x]`
 
 파일:
 
 - `src/vla_drive/training/train.py`
 - `src/vla_drive/training/lora.py`
+- `src/vla_drive/utils/seed.py`
+- `src/vla_drive/utils/logging.py`
 - `scripts/train_lora.sh`
 - `src/vla_drive/configs/base.yaml`
 
@@ -145,8 +156,10 @@
 
 1. argparse 또는 Hydra 중 하나를 선택한다. 단순 구현은 argparse를 우선한다.
 2. dataset, model, optimizer, scheduler, checkpoint 저장을 구현한다.
-3. gradient accumulation과 bf16 옵션을 추가한다.
-4. LoRA는 baseline overfit 성공 후 추가한다.
+3. seed 고정과 training log 저장 helper를 연결한다.
+4. gradient accumulation과 bf16 옵션을 추가한다.
+5. `scripts/train_lora.sh`가 MacBook tiny run 기본값으로 실행되게 한다.
+6. LoRA는 baseline overfit 성공 후 추가한다.
 
 완료 기준:
 
@@ -156,7 +169,7 @@
 
 ## M5: Open-Loop Evaluation
 
-상태: `[ ]`
+상태: `[x]`
 
 파일:
 
@@ -164,6 +177,7 @@
 - `src/vla_drive/evaluation/evaluator.py`
 - `scripts/eval_open_loop.sh`
 - `scripts/prepare_nuscenes.py`
+- `src/vla_drive/configs/nuscenes_open_loop.yaml`
 
 목표:
 
@@ -174,7 +188,8 @@
 1. ADE/FDE metric을 확장한다.
 2. route deviation과 collision proxy metric을 추가한다.
 3. evaluation report JSON을 저장한다.
-4. nuScenes mini 변환은 CARLA eval이 끝난 뒤 진행한다.
+4. `nuscenes_open_loop.yaml`로 checkpoint, dataset, report path를 제어한다.
+5. nuScenes mini 변환은 CARLA eval path가 검증된 뒤 진행한다.
 
 완료 기준:
 
@@ -183,7 +198,7 @@
 
 ## M6: Closed-Loop CARLA Evaluation
 
-상태: `[ ]`
+상태: `[x]`
 
 파일:
 
