@@ -32,3 +32,7 @@ def action_token_loss(logits: torch.Tensor, token_targets: torch.Tensor) -> torc
     """
     B, T, K = logits.shape
     return F.cross_entropy(logits.reshape(B * T, K), token_targets.reshape(B * T))
+
+
+def reasoning_aux_loss(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+    return F.cross_entropy(logits, labels)

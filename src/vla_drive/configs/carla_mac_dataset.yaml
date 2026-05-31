@@ -1,0 +1,28 @@
+defaults:
+  - base
+
+data:
+  dataset: carla
+  root: /private/tmp/vla_drive_carla/mac_dataset_60s_320x180
+
+simulation:
+  host: 127.0.0.1
+  port: 2000
+  town: Town01
+  weather: ClearNoon
+  timeout_seconds: 30.0
+  synchronous_mode: false
+  fixed_delta_seconds: 0.05
+
+collection:
+  seconds: 60.0
+  fps: 10.0
+  warmup_seconds: 2.0
+  image_width: 320
+  image_height: 180
+  fov: 90.0
+  vehicle_filter: vehicle.tesla.model3
+  target_speed_mps: 5.0
+  route_length: 120
+  waypoint_spacing_m: 2.0
+  future_waypoint_count: 8

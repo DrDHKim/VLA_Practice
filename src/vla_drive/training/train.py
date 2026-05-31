@@ -7,11 +7,11 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader, Subset
 
-from vla_drive.data.collate import driving_collate_fn
+from vla_drive.data.collate import driving_collate_fn, reasoning_label_count
 from vla_drive.data.datasets import JsonlDrivingDataset
 from vla_drive.models.action_tokenizer import TrajectoryActionTokenizer
-from vla_drive.models.vla_policy import build_action_token_policy, build_dummy_policy, build_vlm_policy
-from vla_drive.training.losses import action_token_loss, waypoint_prediction_loss
+from vla_drive.models.vla_policy import build_action_token_policy, build_dummy_policy, build_reasoning_aux_policy, build_vlm_policy
+from vla_drive.training.losses import action_token_loss, reasoning_aux_loss, waypoint_prediction_loss
 from vla_drive.utils.io import ensure_dir
 from vla_drive.utils.logging import get_logger
 from vla_drive.utils.seed import seed_everything
@@ -42,7 +42,11 @@ def train(args: argparse.Namespace) -> dict:
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=args.num_workers,
-        collate_fn=lambda samples: driving_collate_fn(samples, image_size=args.image_size),
+        collate_fn=lambda samples: driving_collate_fn(
+            samples,
+            image_size=args.image_size,
+            reasoning_mode=args.reasoning_mode,
+        ),
     )
     if len(loader) == 0:
         raise RuntimeError(f"No training samples found: {args.metadata_path}")
@@ -54,6 +58,14 @@ def train(args: argparse.Namespace) -> dict:
             num_tokens=args.num_action_tokens,
             hidden_dim=args.hidden_dim,
             waypoint_count=args.waypoint_count,
+        ).to(device)
+    elif args.stage == "reasoning_aux":
+        if args.num_reasoning_labels is None:
+            args.num_reasoning_labels = reasoning_label_count(args.reasoning_mode)
+        model = build_reasoning_aux_policy(
+            hidden_dim=args.hidden_dim,
+            waypoint_count=args.waypoint_count,
+            num_reasoning_labels=args.num_reasoning_labels,
         ).to(device)
     elif args.stage == "dummy_overfit":
         model = build_dummy_policy(hidden_dim=args.hidden_dim, waypoint_count=args.waypoint_count).to(device)
@@ -98,6 +110,10 @@ def train(args: argparse.Namespace) -> dict:
     optimizer.zero_grad(set_to_none=True)
     log_mode = "a" if args.resume_from is not None and log_path.exists() else "w"
     last_epoch = start_epoch - 1
+    best_epoch = start_epoch - 1
+    best_loss = float("inf")
+    epochs_without_improvement = 0
+    stopped_early = False
     with log_path.open(log_mode, encoding="utf-8") as log_file:
         for epoch in range(start_epoch, start_epoch + args.epochs):
             last_epoch = epoch
@@ -108,6 +124,15 @@ def train(args: argparse.Namespace) -> dict:
                 output = model(batch)
                 if args.stage == "action_token" and tokenizer is not None:
                     loss = _action_token_step_loss(output, batch, tokenizer, device)
+                elif args.stage == "reasoning_aux":
+                    waypoint_loss = waypoint_prediction_loss(
+                        output["future_waypoints_ego"],
+                        batch["future_waypoints_ego"],
+                        l1_weight=args.l1_weight,
+                        fde_weight=args.fde_weight,
+                    )
+                    reason_loss = reasoning_aux_loss(output["reasoning_logits"], batch["reasoning_labels"])
+                    loss = waypoint_loss + args.reasoning_loss_weight * reason_loss
                 else:
                     loss = waypoint_prediction_loss(
                         output["future_waypoints_ego"],
@@ -138,6 +163,27 @@ def train(args: argparse.Namespace) -> dict:
 
             epoch_loss = sum(epoch_losses) / max(1, len(epoch_losses))
             _save_checkpoint(checkpoint_dir / f"epoch_{epoch:03d}.pt", model, optimizer, epoch, global_step, epoch_loss, args)
+            if epoch_loss < best_loss - args.early_stop_min_delta:
+                best_loss = epoch_loss
+                best_epoch = epoch
+                epochs_without_improvement = 0
+                _save_checkpoint(checkpoint_dir / "best.pt", model, optimizer, epoch, global_step, epoch_loss, args)
+            else:
+                epochs_without_improvement += 1
+
+            if (
+                args.early_stop_patience is not None
+                and epoch + 1 >= args.early_stop_min_epochs
+                and epochs_without_improvement >= args.early_stop_patience
+            ):
+                stopped_early = True
+                LOGGER.info(
+                    "early stopping at epoch=%s best_epoch=%s best_loss=%.6f",
+                    epoch,
+                    best_epoch,
+                    best_loss,
+                )
+                break
 
     final_loss = losses[-1]
     initial_loss = losses[0]
@@ -146,6 +192,10 @@ def train(args: argparse.Namespace) -> dict:
         "initial_loss": initial_loss,
         "final_loss": final_loss,
         "loss_decreased": final_loss < initial_loss,
+        "best_epoch": best_epoch,
+        "best_loss": best_loss,
+        "best_checkpoint": str(checkpoint_dir / "best.pt"),
+        "stopped_early": stopped_early,
         "steps": global_step,
         "checkpoint": str(checkpoint_dir / "latest.pt"),
         "log": str(log_path),
@@ -237,7 +287,11 @@ def _json_safe_args(args: argparse.Namespace) -> dict:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train a tiny VLA waypoint policy.")
-    parser.add_argument("--stage", default="dummy_overfit", choices=["dummy_overfit", "frozen_vlm", "lora_vlm", "action_token"])
+    parser.add_argument(
+        "--stage",
+        default="dummy_overfit",
+        choices=["dummy_overfit", "frozen_vlm", "lora_vlm", "action_token", "reasoning_aux"],
+    )
     parser.add_argument("--metadata-path", type=Path, default=Path("/private/tmp/vla_drive_carla/m1_smoke/metadata.jsonl"))
     parser.add_argument("--checkpoint-dir", type=Path, default=Path("checkpoints/m4_dummy"))
     parser.add_argument("--log-dir", type=Path, default=Path("outputs/logs/m4_dummy"))
@@ -263,6 +317,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lora-alpha", type=int, default=16)
     parser.add_argument("--num-action-tokens", type=int, default=256)
     parser.add_argument("--tokenizer-path", type=Path, default=None)
+    parser.add_argument("--reasoning-mode", choices=["fast", "slow"], default="fast")
+    parser.add_argument("--num-reasoning-labels", type=int, default=None)
+    parser.add_argument("--reasoning-loss-weight", type=float, default=0.1)
+    parser.add_argument("--early-stop-patience", type=int, default=None)
+    parser.add_argument("--early-stop-min-delta", type=float, default=0.0)
+    parser.add_argument("--early-stop-min-epochs", type=int, default=1)
     return parser.parse_args()
 
 

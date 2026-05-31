@@ -4,8 +4,8 @@
 
 이 프로젝트는 처음부터 거대 VLA를 full training하는 방식으로 시작하면 실패 확률이 높다. 현재 환경에서는 다음 순서가 가장 현실적이다.
 
-1. MacBook에서 CARLA 데이터 수집-학습-평가의 아주 작은 end-to-end 루프를 먼저 만든다.
-2. 같은 루프를 RTX 5090에서 중간 규모 데이터/학습/평가로 확장한다.
+1. MacBook에서 CARLA 데이터 수집-학습-평가 end-to-end 루프를 만들고, 가능한 범위까지 규모를 키운다.
+2. MacBook에서 batch/image/model/route/traffic 축소와 최적화를 해도 리소스 한계가 명확할 때만 같은 루프를 RTX 5090으로 확장한다.
 3. 작은 VLM backbone + waypoint head로 baseline을 만든다.
 4. nuScenes/NAVSIM에서 open-loop 평가를 붙인다.
 5. OpenDriveVLA/AutoVLA 논문 구조를 따라 action tokenization과 reasoning supervision을 확장한다.
@@ -29,9 +29,9 @@
 
 - 목적: closed-loop 평가와 자체 imitation 데이터 생성
 - 실행 규모:
-  - MacBook: tiny smoke routes, low resolution, low traffic, 짧은 학습/평가
-  - RTX 5090: 중간 규모 route/weather/traffic 확장, LoRA/QLoRA 반복
-  - AIP/H100: 검증된 실험의 대규모 ablation/장시간 학습
+  - MacBook: 기본 실행 환경. tiny smoke에서 시작하되 가능한 route/weather/traffic/image/model 규모까지 확장
+  - RTX 5090: MacBook 리소스 한계가 기록된 뒤 중간/대규모 route/weather/traffic 확장, LoRA/QLoRA 반복
+  - AIP/H100: RTX 5090 리소스 한계 또는 대규모 ablation 필요성이 기록된 뒤 장시간 학습
 - 입력:
   - front RGB
   - optional multi-view RGB
@@ -46,7 +46,7 @@
 
 - 목적: open-loop trajectory prediction 및 multi-view perception 기반 사전학습
 - 시작은 mini split로 한다.
-- full dataset은 MacBook smoke run 이후 RTX 5090 또는 외부 저장소에서 처리한다.
+- full dataset은 MacBook에서 가능한 변환/샘플링/metric path를 먼저 확인하고, 용량/시간 한계가 확인된 뒤 RTX 5090 또는 외부 저장소에서 처리한다.
 
 ### 2.3 NAVSIM / Bench2Drive
 
@@ -100,6 +100,34 @@
 - reasoning annotation은 처음엔 template/teacher model로 생성
 - action tokenization은 waypoint regression baseline이 안정된 뒤 추가
 
+### M7: MacBook scale envelope
+
+- MacBook에서 가능한 CARLA route 수, collection 시간, image size, training stage, batch size 범위를 계량한다.
+- 성공한 최대 설정과 실패한 최소 설정을 남긴다.
+- 완료 기준: 5090 전환 필요 여부가 로그와 report로 판단 가능함
+
+### M8: dataset expansion
+
+- nuScenes mini 또는 Bench2Drive mini subset을 common schema로 변환한다.
+- CARLA-only checkpoint와 mixed/transfer checkpoint를 같은 open-loop metric으로 비교한다.
+- 완료 기준: MacBook에서 가능한 dataset 변환/평가 범위가 확인됨
+
+### M9: RTX 5090 handoff
+
+- MacBook 결과, config, command, checkpoint, report를 5090 재현 bundle로 묶는다.
+- 완료 기준: 5090에서 바로 실행할 command와 전환 사유가 문서화됨
+
+### M10: RTX 5090 expansion
+
+- MacBook과 같은 code path로 더 큰 CARLA 수집, LoRA/QLoRA 학습, 반복 평가를 수행한다.
+- OOM이 나면 quantization, checkpointing, offload, scale-down을 먼저 시도한다.
+- 완료 기준: H100 전환 필요 여부가 report로 판단 가능함
+
+### M11: H100 final scale
+
+- 5090 한계가 확인된 실험만 H100에서 large run/ablation으로 확장한다.
+- 완료 기준: MacBook -> 5090 -> H100 전체 metric 비교와 failure taxonomy가 있음
+
 ## 4. Qwen3 Coder 작업 지침
 
 - 새 기능을 만들기 전에 관련 문서와 TODO가 있는 스텁 파일을 먼저 읽는다.
@@ -108,17 +136,28 @@
 - 인터넷이 없으면 `docs/research/papers/`와 `docs/research/notes/`만 보고 구현한다.
 - CUDA OOM이 나면 모델을 키우지 말고 batch size, image size, sequence length, LoRA rank, quantization을 먼저 줄인다.
 
-## 5. AIP/H100 사용 판단 기준
+## 5. 장비 전환 판단 기준
 
-AIP/H100으로 넘어가는 조건:
+MacBook에서 RTX 5090으로 넘어가는 조건:
 
-- MacBook에서 CARLA loop, dataset, baseline 학습, open/closed-loop metric의 smoke run이 모두 동작한다.
-- RTX 5090에서 같은 파이프라인의 중간 규모 LoRA/QLoRA 실험 결과가 있고, 대형 학습이 필요한 이유가 문서화되어 있다.
+- 같은 code path에서 MacBook tiny/small run이 동작하고, MacBook에서 가능한 규모 확장을 시도했다.
+- batch size, image size, sequence length, route length, traffic density, model size, LoRA rank 축소를 이미 시도했다.
+- CPU/MPS-safe mode, gradient accumulation, frozen backbone, smaller backbone 같은 MacBook 최적화를 시도했다.
+- 그래도 목표 실험이 시간/메모리/렌더링 안정성 때문에 불가능하다는 로그나 report가 있다.
+- 전환 사유가 `docs/experiments.md` 또는 `docs/research_journal.md`에 기록되어 있다.
+
+RTX 5090에서 AIP/H100으로 넘어가는 조건:
+
+- MacBook에서 CARLA loop, dataset, baseline 학습, open/closed-loop metric이 가능한 범위까지 동작한다.
+- RTX 5090에서 같은 파이프라인의 LoRA/QLoRA 실험 결과가 있다.
+- RTX 5090에서도 batch/model/data 규모를 줄이거나 gradient checkpointing, quantization, CPU offload를 시도했지만 목표 실험이 불가능하다.
+- H100이 필요한 이유가 단순 편의가 아니라 대규모 ablation, 큰 teacher/reference, 장시간 학습 같은 명확한 목적이다.
 - 회사 환경으로 코드가 들어간 뒤 되돌릴 수 없다는 운영 리스크를 감수할 만큼 실험 설계가 고정되어 있다.
 
 넘어가지 말아야 하는 조건:
 
 - 아직 CARLA 평가가 불안정하다.
 - 데이터 포맷이 바뀌고 있다.
-- 단순 OOM 회피가 목적이다.
+- 현재 장비에서 가능한 축소/최적화 실험을 아직 하지 않았다.
+- 단순 OOM 회피 또는 빠른 실행 편의가 목적이다.
 - 논문 재현 범위가 명확하지 않다.

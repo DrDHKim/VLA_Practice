@@ -1,0 +1,407 @@
+{
+  "best_by_ade": "action_token_i64_n10",
+  "closed_loop": {
+    "failed_count": 0,
+    "runs": [
+      {
+        "aggregate": {
+          "mean_driving_score": 0.0379746835443038,
+          "mean_route_completion": 0.0379746835443038,
+          "route_count": 1,
+          "total_collisions": 0
+        },
+        "ended_at": "2026-05-31T11:15:44Z",
+        "report_path": "/private/tmp/vla_drive_mac_scale_final/closed_loop_1routes_3s.json",
+        "route_count": 1,
+        "route_seconds": 3.0,
+        "started_at": "2026-05-31T11:15:34Z",
+        "status": "ok"
+      },
+      {
+        "aggregate": {
+          "mean_driving_score": 0.0379746835443038,
+          "mean_route_completion": 0.0379746835443038,
+          "route_count": 5,
+          "total_collisions": 0
+        },
+        "ended_at": "2026-05-31T11:16:04Z",
+        "report_path": "/private/tmp/vla_drive_mac_scale_final/closed_loop_5routes_3s.json",
+        "route_count": 5,
+        "route_seconds": 3.0,
+        "started_at": "2026-05-31T11:15:44Z",
+        "status": "ok"
+      }
+    ],
+    "status": "ok",
+    "successful_count": 2
+  },
+  "collection": {
+    "failed_count": 0,
+    "runs": [
+      {
+        "ended_at": "2026-05-31T11:15:34Z",
+        "frames": 30,
+        "image_height": 90,
+        "image_width": 160,
+        "label": "collect_3s_160x90",
+        "message": "",
+        "metadata_path": "/private/tmp/vla_drive_mac_scale_final/collections/collect_3s_160x90/metadata.jsonl",
+        "output_root": "/private/tmp/vla_drive_mac_scale_final/collections/collect_3s_160x90",
+        "seconds": 3.0,
+        "started_at": "2026-05-31T11:15:21Z",
+        "status": "ok"
+      }
+    ],
+    "status": "ok",
+    "successful_count": 1
+  },
+  "environment": {
+    "disk_free_gib": 88.16,
+    "disk_total_gib": 460.43,
+    "metadata_path": "/private/tmp/vla_drive_carla/m1_smoke/metadata.jsonl",
+    "metadata_sample_count": 300,
+    "platform": "macOS-26.5-arm64-arm-64bit",
+    "python": "3.10.19"
+  },
+  "failed_count": 0,
+  "run_count": 16,
+  "runs": [
+    {
+      "checkpoint_dir": "/private/tmp/vla_drive_mac_scale_final/checkpoints/dummy_i64_n10",
+      "ended_at": "2026-05-31T11:14:40Z",
+      "image_size": 64,
+      "label": "dummy_i64_n10",
+      "log_dir": "/private/tmp/vla_drive_mac_scale_final/logs/dummy_i64_n10",
+      "max_samples": 10,
+      "message": "",
+      "metrics": {
+        "ade": 8.67346649169922,
+        "collision_proxy_rate": 1.0,
+        "fde": 14.870388793945313,
+        "route_deviation": 0.10811586081981658,
+        "sample_count": 10
+      },
+      "reasoning_mode": "fast",
+      "report_path": "/private/tmp/vla_drive_mac_scale_final/dummy_i64_n10_open_loop.json",
+      "stage": "dummy_overfit",
+      "started_at": "2026-05-31T11:14:38Z",
+      "status": "ok"
+    },
+    {
+      "checkpoint_dir": "/private/tmp/vla_drive_mac_scale_final/checkpoints/reason_fast_i64_n10",
+      "ended_at": "2026-05-31T11:14:43Z",
+      "image_size": 64,
+      "label": "reason_fast_i64_n10",
+      "log_dir": "/private/tmp/vla_drive_mac_scale_final/logs/reason_fast_i64_n10",
+      "max_samples": 10,
+      "message": "",
+      "metrics": {
+        "ade": 8.680286407470703,
+        "collision_proxy_rate": 1.0,
+        "fde": 14.875692749023438,
+        "route_deviation": 0.1084347978234291,
+        "sample_count": 10
+      },
+      "reasoning_mode": "fast",
+      "report_path": "/private/tmp/vla_drive_mac_scale_final/reason_fast_i64_n10_open_loop.json",
+      "stage": "reasoning_aux",
+      "started_at": "2026-05-31T11:14:40Z",
+      "status": "ok"
+    },
+    {
+      "checkpoint_dir": "/private/tmp/vla_drive_mac_scale_final/checkpoints/reason_slow_i64_n10",
+      "ended_at": "2026-05-31T11:14:45Z",
+      "image_size": 64,
+      "label": "reason_slow_i64_n10",
+      "log_dir": "/private/tmp/vla_drive_mac_scale_final/logs/reason_slow_i64_n10",
+      "max_samples": 10,
+      "message": "",
+      "metrics": {
+        "ade": 8.677367210388184,
+        "collision_proxy_rate": 1.0,
+        "fde": 14.877950286865234,
+        "route_deviation": 0.09742511957883834,
+        "sample_count": 10
+      },
+      "reasoning_mode": "slow",
+      "report_path": "/private/tmp/vla_drive_mac_scale_final/reason_slow_i64_n10_open_loop.json",
+      "stage": "reasoning_aux",
+      "started_at": "2026-05-31T11:14:43Z",
+      "status": "ok"
+    },
+    {
+      "checkpoint_dir": "/private/tmp/vla_drive_mac_scale_final/checkpoints/action_token_i64_n10",
+      "ended_at": "2026-05-31T11:14:49Z",
+      "image_size": 64,
+      "label": "action_token_i64_n10",
+      "log_dir": "/private/tmp/vla_drive_mac_scale_final/logs/action_token_i64_n10",
+      "max_samples": 10,
+      "message": "",
+      "metrics": {
+        "ade": 0.5893672645092011,
+        "collision_proxy_rate": 0.0,
+        "fde": 0.984214985370636,
+        "route_deviation": 0.044375862926244736,
+        "sample_count": 10
+      },
+      "reasoning_mode": "fast",
+      "report_path": "/private/tmp/vla_drive_mac_scale_final/action_token_i64_n10_open_loop.json",
+      "stage": "action_token",
+      "started_at": "2026-05-31T11:14:45Z",
+      "status": "ok"
+    },
+    {
+      "checkpoint_dir": "/private/tmp/vla_drive_mac_scale_final/checkpoints/dummy_i64_n20",
+      "ended_at": "2026-05-31T11:14:51Z",
+      "image_size": 64,
+      "label": "dummy_i64_n20",
+      "log_dir": "/private/tmp/vla_drive_mac_scale_final/logs/dummy_i64_n20",
+      "max_samples": 20,
+      "message": "",
+      "metrics": {
+        "ade": 8.087937259674073,
+        "collision_proxy_rate": 1.0,
+        "fde": 13.238372802734375,
+        "route_deviation": 0.07127234041690826,
+        "sample_count": 20
+      },
+      "reasoning_mode": "fast",
+      "report_path": "/private/tmp/vla_drive_mac_scale_final/dummy_i64_n20_open_loop.json",
+      "stage": "dummy_overfit",
+      "started_at": "2026-05-31T11:14:49Z",
+      "status": "ok"
+    },
+    {
+      "checkpoint_dir": "/private/tmp/vla_drive_mac_scale_final/checkpoints/reason_fast_i64_n20",
+      "ended_at": "2026-05-31T11:14:53Z",
+      "image_size": 64,
+      "label": "reason_fast_i64_n20",
+      "log_dir": "/private/tmp/vla_drive_mac_scale_final/logs/reason_fast_i64_n20",
+      "max_samples": 20,
+      "message": "",
+      "metrics": {
+        "ade": 8.079638004302979,
+        "collision_proxy_rate": 1.0,
+        "fde": 13.222285842895507,
+        "route_deviation": 0.09171207323670387,
+        "sample_count": 20
+      },
+      "reasoning_mode": "fast",
+      "report_path": "/private/tmp/vla_drive_mac_scale_final/reason_fast_i64_n20_open_loop.json",
+      "stage": "reasoning_aux",
+      "started_at": "2026-05-31T11:14:51Z",
+      "status": "ok"
+    },
+    {
+      "checkpoint_dir": "/private/tmp/vla_drive_mac_scale_final/checkpoints/reason_slow_i64_n20",
+      "ended_at": "2026-05-31T11:14:56Z",
+      "image_size": 64,
+      "label": "reason_slow_i64_n20",
+      "log_dir": "/private/tmp/vla_drive_mac_scale_final/logs/reason_slow_i64_n20",
+      "max_samples": 20,
+      "message": "",
+      "metrics": {
+        "ade": 8.069427967071533,
+        "collision_proxy_rate": 1.0,
+        "fde": 13.20760736465454,
+        "route_deviation": 0.07525277286767959,
+        "sample_count": 20
+      },
+      "reasoning_mode": "slow",
+      "report_path": "/private/tmp/vla_drive_mac_scale_final/reason_slow_i64_n20_open_loop.json",
+      "stage": "reasoning_aux",
+      "started_at": "2026-05-31T11:14:53Z",
+      "status": "ok"
+    },
+    {
+      "checkpoint_dir": "/private/tmp/vla_drive_mac_scale_final/checkpoints/action_token_i64_n20",
+      "ended_at": "2026-05-31T11:15:00Z",
+      "image_size": 64,
+      "label": "action_token_i64_n20",
+      "log_dir": "/private/tmp/vla_drive_mac_scale_final/logs/action_token_i64_n20",
+      "max_samples": 20,
+      "message": "",
+      "metrics": {
+        "ade": 0.9808588981628418,
+        "collision_proxy_rate": 0.0,
+        "fde": 0.995642963051796,
+        "route_deviation": 0.07070471793413162,
+        "sample_count": 20
+      },
+      "reasoning_mode": "fast",
+      "report_path": "/private/tmp/vla_drive_mac_scale_final/action_token_i64_n20_open_loop.json",
+      "stage": "action_token",
+      "started_at": "2026-05-31T11:14:56Z",
+      "status": "ok"
+    },
+    {
+      "checkpoint_dir": "/private/tmp/vla_drive_mac_scale_final/checkpoints/dummy_i128_n10",
+      "ended_at": "2026-05-31T11:15:02Z",
+      "image_size": 128,
+      "label": "dummy_i128_n10",
+      "log_dir": "/private/tmp/vla_drive_mac_scale_final/logs/dummy_i128_n10",
+      "max_samples": 10,
+      "message": "",
+      "metrics": {
+        "ade": 8.672593116760254,
+        "collision_proxy_rate": 1.0,
+        "fde": 14.869084548950195,
+        "route_deviation": 0.10878853499889374,
+        "sample_count": 10
+      },
+      "reasoning_mode": "fast",
+      "report_path": "/private/tmp/vla_drive_mac_scale_final/dummy_i128_n10_open_loop.json",
+      "stage": "dummy_overfit",
+      "started_at": "2026-05-31T11:15:00Z",
+      "status": "ok"
+    },
+    {
+      "checkpoint_dir": "/private/tmp/vla_drive_mac_scale_final/checkpoints/reason_fast_i128_n10",
+      "ended_at": "2026-05-31T11:15:04Z",
+      "image_size": 128,
+      "label": "reason_fast_i128_n10",
+      "log_dir": "/private/tmp/vla_drive_mac_scale_final/logs/reason_fast_i128_n10",
+      "max_samples": 10,
+      "message": "",
+      "metrics": {
+        "ade": 8.679782295227051,
+        "collision_proxy_rate": 1.0,
+        "fde": 14.87177391052246,
+        "route_deviation": 0.10721973031759262,
+        "sample_count": 10
+      },
+      "reasoning_mode": "fast",
+      "report_path": "/private/tmp/vla_drive_mac_scale_final/reason_fast_i128_n10_open_loop.json",
+      "stage": "reasoning_aux",
+      "started_at": "2026-05-31T11:15:02Z",
+      "status": "ok"
+    },
+    {
+      "checkpoint_dir": "/private/tmp/vla_drive_mac_scale_final/checkpoints/reason_slow_i128_n10",
+      "ended_at": "2026-05-31T11:15:06Z",
+      "image_size": 128,
+      "label": "reason_slow_i128_n10",
+      "log_dir": "/private/tmp/vla_drive_mac_scale_final/logs/reason_slow_i128_n10",
+      "max_samples": 10,
+      "message": "",
+      "metrics": {
+        "ade": 8.676754379272461,
+        "collision_proxy_rate": 1.0,
+        "fde": 14.87712802886963,
+        "route_deviation": 0.09561991393566131,
+        "sample_count": 10
+      },
+      "reasoning_mode": "slow",
+      "report_path": "/private/tmp/vla_drive_mac_scale_final/reason_slow_i128_n10_open_loop.json",
+      "stage": "reasoning_aux",
+      "started_at": "2026-05-31T11:15:04Z",
+      "status": "ok"
+    },
+    {
+      "checkpoint_dir": "/private/tmp/vla_drive_mac_scale_final/checkpoints/action_token_i128_n10",
+      "ended_at": "2026-05-31T11:15:10Z",
+      "image_size": 128,
+      "label": "action_token_i128_n10",
+      "log_dir": "/private/tmp/vla_drive_mac_scale_final/logs/action_token_i128_n10",
+      "max_samples": 10,
+      "message": "",
+      "metrics": {
+        "ade": 0.5893672645092011,
+        "collision_proxy_rate": 0.0,
+        "fde": 0.984214985370636,
+        "route_deviation": 0.044375862926244736,
+        "sample_count": 10
+      },
+      "reasoning_mode": "fast",
+      "report_path": "/private/tmp/vla_drive_mac_scale_final/action_token_i128_n10_open_loop.json",
+      "stage": "action_token",
+      "started_at": "2026-05-31T11:15:06Z",
+      "status": "ok"
+    },
+    {
+      "checkpoint_dir": "/private/tmp/vla_drive_mac_scale_final/checkpoints/dummy_i128_n20",
+      "ended_at": "2026-05-31T11:15:12Z",
+      "image_size": 128,
+      "label": "dummy_i128_n20",
+      "log_dir": "/private/tmp/vla_drive_mac_scale_final/logs/dummy_i128_n20",
+      "max_samples": 20,
+      "message": "",
+      "metrics": {
+        "ade": 8.08731164932251,
+        "collision_proxy_rate": 1.0,
+        "fde": 13.23950662612915,
+        "route_deviation": 0.07154301591217518,
+        "sample_count": 20
+      },
+      "reasoning_mode": "fast",
+      "report_path": "/private/tmp/vla_drive_mac_scale_final/dummy_i128_n20_open_loop.json",
+      "stage": "dummy_overfit",
+      "started_at": "2026-05-31T11:15:10Z",
+      "status": "ok"
+    },
+    {
+      "checkpoint_dir": "/private/tmp/vla_drive_mac_scale_final/checkpoints/reason_fast_i128_n20",
+      "ended_at": "2026-05-31T11:15:15Z",
+      "image_size": 128,
+      "label": "reason_fast_i128_n20",
+      "log_dir": "/private/tmp/vla_drive_mac_scale_final/logs/reason_fast_i128_n20",
+      "max_samples": 20,
+      "message": "",
+      "metrics": {
+        "ade": 8.078962755203246,
+        "collision_proxy_rate": 1.0,
+        "fde": 13.221780681610108,
+        "route_deviation": 0.0920981876552105,
+        "sample_count": 20
+      },
+      "reasoning_mode": "fast",
+      "report_path": "/private/tmp/vla_drive_mac_scale_final/reason_fast_i128_n20_open_loop.json",
+      "stage": "reasoning_aux",
+      "started_at": "2026-05-31T11:15:12Z",
+      "status": "ok"
+    },
+    {
+      "checkpoint_dir": "/private/tmp/vla_drive_mac_scale_final/checkpoints/reason_slow_i128_n20",
+      "ended_at": "2026-05-31T11:15:17Z",
+      "image_size": 128,
+      "label": "reason_slow_i128_n20",
+      "log_dir": "/private/tmp/vla_drive_mac_scale_final/logs/reason_slow_i128_n20",
+      "max_samples": 20,
+      "message": "",
+      "metrics": {
+        "ade": 8.068104028701782,
+        "collision_proxy_rate": 1.0,
+        "fde": 13.209539413452148,
+        "route_deviation": 0.07181592285633087,
+        "sample_count": 20
+      },
+      "reasoning_mode": "slow",
+      "report_path": "/private/tmp/vla_drive_mac_scale_final/reason_slow_i128_n20_open_loop.json",
+      "stage": "reasoning_aux",
+      "started_at": "2026-05-31T11:15:15Z",
+      "status": "ok"
+    },
+    {
+      "checkpoint_dir": "/private/tmp/vla_drive_mac_scale_final/checkpoints/action_token_i128_n20",
+      "ended_at": "2026-05-31T11:15:21Z",
+      "image_size": 128,
+      "label": "action_token_i128_n20",
+      "log_dir": "/private/tmp/vla_drive_mac_scale_final/logs/action_token_i128_n20",
+      "max_samples": 20,
+      "message": "",
+      "metrics": {
+        "ade": 0.9800985813140869,
+        "collision_proxy_rate": 0.0,
+        "fde": 0.9945912778377533,
+        "route_deviation": 0.06706703547388315,
+        "sample_count": 20
+      },
+      "reasoning_mode": "fast",
+      "report_path": "/private/tmp/vla_drive_mac_scale_final/action_token_i128_n20_open_loop.json",
+      "stage": "action_token",
+      "started_at": "2026-05-31T11:15:17Z",
+      "status": "ok"
+    }
+  ],
+  "successful_count": 16
+}

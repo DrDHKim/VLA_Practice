@@ -8,11 +8,11 @@
 
 선택 이유:
 
-- RTX 5090 32GB에서 LoRA/QLoRA 실험이 가능해야 한다.
-- MacBook에서 CARLA data collection, 작은 training, 작은 evaluation smoke run이 가능해야 한다.
+- MacBook에서 CARLA data collection, 작은 training, 작은 evaluation을 가능한 범위까지 수행할 수 있어야 한다.
+- RTX 5090 32GB는 MacBook 리소스 한계가 기록된 뒤 LoRA/QLoRA 실험을 확장하는 장비로 사용한다.
 - closed-loop driving에서는 action token을 바로 control로 내는 것보다 future waypoint를 예측하고 controller로 변환하는 편이 디버깅 가능하다.
 - reasoning text는 safety 검증 수단이지, 초기 control loop의 필수 조건이 아니다.
-- AIP/H100은 irreversible environment로 취급한다. MacBook/RTX 5090에서 data/evaluation/training code가 안정되기 전에는 쓰지 않는다.
+- AIP/H100은 irreversible environment로 취급한다. MacBook/RTX 5090에서 가능한 축소/최적화 실험을 모두 시도하기 전에는 쓰지 않는다.
 
 Baseline:
 
@@ -42,16 +42,16 @@ PID/MPC controller -> steer/throttle/brake
 - waypoint count: 8
 - loss: L1 waypoint loss + final displacement loss
 - optimizer: AdamW
-- precision: MacBook smoke run은 fp32/MPS-safe mode, RTX 5090은 bf16
-- fine-tuning: MacBook에서는 먼저 freeze backbone, RTX 5090에서는 LoRA rank 8 또는 16
-- batch size: MacBook은 1부터 시작, RTX 5090은 1-4부터 시작하고 gradient accumulation 사용
+- precision: MacBook은 fp32/MPS-safe mode부터 시작해 가능한 범위까지 유지, RTX 5090은 리소스 한계 이후 bf16
+- fine-tuning: MacBook에서는 먼저 freeze backbone과 작은 LoRA를 시도, 리소스 한계 이후 RTX 5090에서 LoRA rank 8 또는 16
+- batch size: MacBook은 1부터 시작해 가능한 범위까지 확장, RTX 5090은 1-4부터 시작하고 gradient accumulation 사용
 
 지금은 거절:
 
 - 10B model full fine-tuning
 - 첫 model로 direct steer/throttle/brake-only imitation 사용
 - 검증되지 않은 chain-of-thought를 safety signal로 사용
-- MacBook과 RTX 5090에서 CARLA data collection, training, evaluation이 동작하기 전에 AIP/H100으로 이동
+- MacBook과 RTX 5090에서 가능한 CARLA data collection, training, evaluation을 모두 시도하기 전에 AIP/H100으로 이동
 
 ## 반드시 읽을 논문 (Must Read Papers)
 

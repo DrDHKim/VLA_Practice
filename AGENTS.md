@@ -11,10 +11,11 @@
 
 ## 프로젝트 방향
 
-- 실행 순서는 MacBook tiny smoke run -> RTX 5090 medium run -> AIP/H100 large run이다.
+- 실행 순서는 MacBook에서 가능한 실험을 최대한 수행 -> MacBook 리소스 한계 기록 후 RTX 5090 확장 -> RTX 5090 리소스 한계 기록 후 AIP/H100 확장이다.
 - 모든 장비에서 pipeline은 같다: CARLA data collection -> training -> open-loop evaluation -> closed-loop evaluation.
-- 먼저 MacBook smoke behavior를 구현하고, 같은 code path를 나중에 확장한다.
-- MacBook과 RTX 5090 run이 AIP/H100 migration을 정당화하기 전에는 AIP/H100으로 옮기지 않는다.
+- 먼저 MacBook에서 같은 code path를 가능한 범위까지 구현/검증한다.
+- MacBook에서 batch/image/model/route/traffic 축소와 최적화를 해도 리소스 한계가 명확할 때만 RTX 5090으로 옮긴다.
+- RTX 5090에서도 quantization/checkpointing/offload와 scale-down을 시도한 뒤, H100 필요성이 문서화될 때만 AIP/H100으로 옮긴다.
 
 ## 작업 규칙
 
@@ -23,6 +24,7 @@
 - `TASKS.md`가 요구하지 않는 한 folder structure를 바꾸지 않는다.
 - 큰 rewrite보다 작고 검증 가능한 변경을 우선한다.
 - 금지 규칙을 만나면 멈추지 말고 문서에 적힌 대안을 사용한다.
+- 코드, 스크립트, 설정, 문서, 실험 결과 등 변경내용이 발생하면 `docs/research_journal.md`에 날짜와 함께 기록한다.
 
 ## 코드 규칙
 
@@ -36,9 +38,9 @@
 
 ## 규모 규칙
 
-- MacBook: 짧은 route, 낮은 resolution, 낮은 traffic, tiny/small training, small evaluation.
-- RTX 5090: 더 큰 CARLA collection, LoRA/QLoRA, 반복 evaluation.
-- AIP/H100: local validation 이후 final large run과 ablation에만 사용.
+- MacBook: 짧은 route, 낮은 resolution, 낮은 traffic, tiny/small training, small evaluation에서 시작하되 가능한 범위까지 확장한다.
+- RTX 5090: MacBook 리소스 한계가 기록된 뒤 더 큰 CARLA collection, LoRA/QLoRA, 반복 evaluation을 수행한다.
+- AIP/H100: RTX 5090 리소스 한계 또는 대규모 ablation 필요성이 기록된 뒤 final large run과 ablation에만 사용한다.
 - 10B급 full fine-tuning으로 시작하지 않는다. 먼저 frozen backbone, LoRA, QLoRA, 작은 image size, gradient accumulation을 사용한다.
 
 ## Offline 규칙

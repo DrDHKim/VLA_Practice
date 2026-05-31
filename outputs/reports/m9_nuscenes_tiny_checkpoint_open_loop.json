@@ -1,0 +1,11 @@
+{
+  "ade": 1.8858193516731263,
+  "checkpoint_path": "/private/tmp/vla_drive_nuscenes_tiny_ckpt_20e/latest.pt",
+  "collision_proxy_rate": 0.85,
+  "fde": 4.195649659633636,
+  "metadata_path": "/private/tmp/vla_drive_nuscenes_mini/metadata.jsonl",
+  "reasoning_mode": "fast",
+  "route_deviation": 0.644213505834341,
+  "sample_count": 40,
+  "stage": "dummy_overfit"
+}

@@ -4,7 +4,7 @@
 
 ## 2026-05-29: 프로젝트 초기 구성
 
-목표를 CARLA closed-loop에서 동작하는 VLA 기반 자율주행 agent 구현으로 정했다. 처음부터 대형 VLA를 full fine-tuning하지 않고, MacBook tiny smoke run에서 시작해 RTX 5090 medium run, AIP/H100 large run으로 확장하는 ladder를 채택했다.
+목표를 CARLA closed-loop에서 동작하는 VLA 기반 자율주행 agent 구현으로 정했다. 처음부터 대형 VLA를 full fine-tuning하지 않고, MacBook에서 가능한 실험을 최대한 수행한 뒤 리소스 한계가 확인될 때 RTX 5090, 그 다음 AIP/H100으로 확장하는 ladder를 채택했다.
 
 초기 repository 구조를 만들었다.
 
@@ -27,7 +27,7 @@ VLA autonomous driving 관련 핵심 논문을 `docs/research/papers/`에 저장
 - 출력은 direct control보다 future waypoints in ego frame을 우선한다.
 - control은 PID/MPC 계열 controller로 변환한다.
 - reasoning/action tokenization은 waypoint regression baseline이 안정된 뒤 확장한다.
-- AIP/H100은 MacBook/RTX 5090에서 pipeline이 검증된 뒤에만 사용한다.
+- AIP/H100은 MacBook/RTX 5090에서 가능한 축소/최적화 실험을 모두 시도하고, 리소스 한계나 대규모 ablation 필요성이 기록된 뒤에만 사용한다.
 
 MacBook offline environment도 준비했다.
 
@@ -374,6 +374,554 @@ pytest 전체 (not slow):
 
 다음 작업:
 
-1. Phase D: reasoning auxiliary loss 또는 CARLA data 규모 확장 후 RTX 5090으로 전환
-2. MacBook에서는 tiny route와 CPU/MPS-safe mode만 유지한다.
-3. RTX 5090 확장 전까지 같은 code path에서 반복 검증한다.
+1. Phase D: reasoning auxiliary loss 또는 CARLA data 규모 확장을 MacBook에서 가능한 범위까지 먼저 수행
+2. MacBook에서는 tiny route에서 시작해 CPU/MPS-safe mode, 작은 LoRA, 작은 batch/image 설정으로 가능한 확장을 계속 시도
+3. RTX 5090 전환은 MacBook 리소스 한계와 전환 사유를 기록한 뒤 진행
+
+## 2026-05-31: 프로젝트 장비 전환 구조 수정
+
+프로젝트 구조를 단순한 `Mac tiny -> RTX 5090 medium -> H100 large` 단계가 아니라, 현재 장비에서 가능한 실험을 먼저 끝까지 수행하고 리소스 한계가 확인될 때만 다음 장비로 넘어가는 방식으로 바꿨다.
+
+갱신한 문서:
+
+- `TASKS.md`: 전역 규칙을 Mac-first resource-exhaustion gate로 수정
+- `README.md`: 하드웨어 전환 원칙과 역할표 수정
+- `project_plan.md`: MacBook -> RTX 5090, RTX 5090 -> H100 전환 조건 구체화
+- `docs/setup.md`: scale ladder, 하드웨어 역할, AIP/H100 진입 기준 수정
+- `docs/data.md`: CARLA/nuScenes data scale 정책 수정
+- `docs/experiments.md`: 장비 전환 기록 양식 추가
+
+## 2026-05-31: Phase D — Reasoning Auxiliary Target 구현
+
+M7의 reasoning auxiliary target을 Mac에서 바로 검증 가능한 route/speed 기반 보조 label로 구현했다.
+
+구현 내용:
+
+- `src/vla_drive/models/reasoning_head.py`: hidden state -> reasoning class logits
+- `src/vla_drive/data/collate.py`: `reasoning_targets`, `reasoning_labels` 생성
+- `src/vla_drive/models/vla_policy.py`: `ReasoningAuxPolicy`, `build_reasoning_aux_policy()`
+- `src/vla_drive/training/losses.py`: `reasoning_aux_loss()`
+- `src/vla_drive/training/train.py`: `reasoning_aux` stage, `--reasoning-loss-weight`, `--num-reasoning-labels`
+- `tests/unit/test_reasoning_aux.py`: reasoning label heuristic와 forward/backward test
+
+검증:
+
+```text
+reasoning_aux smoke:
+initial_loss=13.104373931884766
+final_loss=8.940935134887695
+steps=30
+loss_decreased=true
+```
+
+Open-loop 비교 report:
+
+```text
+outputs/reports/m7_regression_vs_action_token.json
+regression ADE=0.6609331727027893, FDE=0.5310325622558594
+action_token ADE=0.5860463201999664, FDE=0.5834009408950805
+reasoning_aux ADE=7.2080940246582035, FDE=11.141493988037109
+```
+
+테스트:
+
+```text
+tests/unit/test_reasoning_aux.py + test_action_tokenizer.py + test_vla_policy_m3.py + test_metrics.py
+11 passed
+```
+
+다음 작업:
+
+1. fast/slow reasoning mode의 최소 smoke 비교를 추가한다.
+2. MacBook에서 가능한 CARLA data scale 확장을 먼저 시도하고, 한계가 확인될 때만 5090 전환 기록을 남긴다.
+
+## 2026-05-31: M7 이후 milestone 구조 추가
+
+M7 이후 작업이 끊기지 않도록 `TASKS.md`, `project_plan.md`, `docs/experiments.md`에 후속 milestone을 추가했다. 기준은 MacBook에서 가능한 실험을 먼저 계량하고, 리소스 한계가 문서화될 때만 5090/H100으로 넘어가는 구조다.
+
+추가한 흐름:
+
+- M8: MacBook Scale Envelope — Mac에서 성공 가능한 최대 수집/학습/평가 설정과 실패 설정을 기록
+- M9: Dataset Expansion on Mac — nuScenes/Bench2Drive mini subset을 common schema로 변환
+- M10: 5090 Handoff Package — Mac 결과와 전환 사유를 5090 재현 bundle로 정리
+- M11: RTX 5090 Expansion — 같은 code path를 5090에서 확장하고 H100 필요성을 판단
+- M12: H100 Final Scale and Ablation — 5090 한계가 확인된 실험만 H100에서 final run/ablation 수행
+
+실험 matrix도 E06 MacBook Scale Envelope, E07 5090 Handoff, E08 5090 Expansion, E09 H100 Final Ablation 순서로 정리했다.
+
+## 2026-05-31: AGENTS.md 변경 기록 규칙 추가
+
+`AGENTS.md`에 변경내용이 발생하면 `docs/research_journal.md`에 날짜와 함께 기록한다는 규칙을 추가했다.
+
+함께 정리한 내용:
+
+- 프로젝트 방향을 MacBook 가능한 최대 검증 -> MacBook 리소스 한계 기록 후 RTX 5090 확장 -> RTX 5090 리소스 한계 기록 후 AIP/H100 확장으로 갱신
+- 규모 규칙도 Mac-first/resource-gated 정책에 맞게 수정
+
+## 2026-05-31: M7 Fast/Slow Reasoning Mode 완료
+
+M7의 마지막 남은 항목인 fast/slow reasoning mode smoke 비교를 구현했다.
+
+구현 내용:
+
+- `src/vla_drive/data/collate.py`: `reasoning_mode=fast|slow` 지원
+  - fast: `keep_lane`, `turn_left`, `turn_right`, `slow_or_stop` 4-class label
+  - slow: command와 speed bucket을 결합한 6-class label
+- `src/vla_drive/training/train.py`: `--reasoning-mode`, 자동 `num_reasoning_labels` 설정
+- `scripts/train_lora.sh`, `launchers/03_학습.command`: reasoning mode/loss weight 전달
+- `src/vla_drive/evaluation/evaluator.py`: report에 `reasoning_mode` 기록
+- `tests/unit/test_reasoning_aux.py`: slow reasoning label test 추가
+
+검증:
+
+```text
+fast reasoning_aux:
+initial_loss=13.104373931884766
+final_loss=8.940935134887695
+loss_decreased=true
+
+slow reasoning_aux:
+initial_loss=13.202237129211426
+final_loss=9.018375396728516
+loss_decreased=true
+```
+
+Open-loop 비교 report:
+
+```text
+outputs/reports/m7_fast_slow_reasoning_comparison.json
+fast ADE=7.2080940246582035, FDE=11.141493988037109
+slow ADE=7.201081943511963, FDE=11.119636535644531
+```
+
+M7 상태는 `[x]`로 갱신했다. 다음 구현 대상은 M8 MacBook Scale Envelope다.
+
+## 2026-05-31: M8 MacBook Scale Envelope 시작
+
+M8의 첫 실행 기반으로 `scripts/run_mac_scale_sweep.sh`를 추가했다. 기본 모드는 CARLA server 없이 현재 수집된 JSONL로 training/open-loop evaluation scale을 계량하고, `RUN_CARLA_CLOSED_LOOP=1`일 때만 짧은 closed-loop smoke를 포함한다.
+
+구현 내용:
+
+- 환경 기록: platform, Python version, metadata sample count, disk free/total
+- training sweep: `dummy_overfit`, `reasoning_aux fast`, `reasoning_aux slow`, `action_token`
+- open-loop evaluation: 각 checkpoint를 같은 ADE/FDE/route deviation/collision proxy metric으로 평가
+- summary output: `outputs/reports/mac_scale_envelope.json`
+
+Smoke 실행:
+
+```text
+EPOCHS=1 MAX_SAMPLES_LIST=10 IMAGE_SIZES=64 OUT_DIR=/private/tmp/vla_drive_mac_scale_smoke SUMMARY_PATH=outputs/reports/mac_scale_envelope.json DEVICE=cpu scripts/run_mac_scale_sweep.sh
+```
+
+결과:
+
+```text
+run_count=4
+successful_count=4
+failed_count=0
+best_by_ade=action_token_i64_n10
+closed_loop_status=skipped
+```
+
+M8 상태는 `[~]`로 갱신했다. 남은 항목은 CARLA collection scale sweep과 closed-loop scale sweep이다.
+
+## 2026-05-31: M8 MacBook Scale Envelope 완료
+
+M8 scale envelope를 CARLA collection과 closed-loop까지 포함해 실행했다.
+
+최종 실행:
+
+```text
+EPOCHS=2 MAX_SAMPLES_LIST="10 20" IMAGE_SIZES="64 128" \
+OUT_DIR=/private/tmp/vla_drive_mac_scale_final \
+SUMMARY_PATH=outputs/reports/mac_scale_envelope.json \
+DEVICE=cpu \
+RUN_CARLA_COLLECTION=1 COLLECTION_SECONDS_LIST=3 COLLECTION_RESOLUTIONS=160x90 \
+RUN_CARLA_CLOSED_LOOP=1 CLOSED_LOOP_ROUTE_COUNTS="1 5" CLOSED_LOOP_ROUTE_SECONDS=3 \
+scripts/run_mac_scale_sweep.sh
+```
+
+결과:
+
+```text
+training/open-loop runs: 16
+successful_count: 16
+failed_count: 0
+best_by_ade: action_token_i64_n10
+collection_status: ok
+collection_successful_count: 1
+closed_loop_status: ok
+closed_loop_successful_count: 2
+closed_loop_routes: [1, 5]
+```
+
+CARLA collection:
+
+```text
+collect_3s_160x90
+frames=30
+metadata=/private/tmp/vla_drive_mac_scale_final/collections/collect_3s_160x90/metadata.jsonl
+```
+
+Closed-loop smoke:
+
+```text
+1 route, 3 seconds: mean_driving_score=0.0379746835443038, collisions=0
+5 routes, 3 seconds: mean_driving_score=0.0379746835443038, collisions=0
+```
+
+MacBook 기준으로 image size 128, max samples 20, four training stages, 3-second collection, 1/5 route closed-loop smoke까지 성공했다. 아직 5090 전환 근거는 없다. 다음 MacBook 실험 범위는 M9 dataset expansion이며, nuScenes mini 또는 Bench2Drive mini subset을 common schema로 변환한다.
+
+M8 상태는 `[x]`로 갱신했다.
+
+## 2026-05-31: M9 Dataset Expansion on Mac 완료
+
+CARLA 외 dataset path로 nuScenes mini를 선택했다. `data/offline/datasets/nuscenes/v1.0-mini.tgz`가 metadata table과 CAM_FRONT 이미지를 포함하고 있어, Bench2Drive보다 M9 stub 파일명과 목표에 직접 맞는다.
+
+구현 내용:
+
+- `scripts/prepare_nuscenes.py`: nuScenes mini tar에서 JSON table을 읽고, 선택한 CAM_FRONT 이미지만 `/private/tmp/vla_drive_nuscenes_mini/images/`로 추출한다.
+- common schema 변환: `metadata.jsonl`의 `DrivingSample` record에 image path, ego speed, route command, future ego-frame waypoints 8개, reasoning label을 기록한다.
+- `src/vla_drive/configs/nuscenes_open_loop.yaml`: M9 smoke metadata/report path로 갱신했다.
+- `docs/data.md`: 변환 command와 route command/reasoning mapping을 문서화했다.
+
+변환 실행:
+
+```text
+.conda/bin/python scripts/prepare_nuscenes.py --output-root /private/tmp/vla_drive_nuscenes_mini --max-samples 40 --future-steps 8 --sample-stride 2
+```
+
+결과:
+
+```text
+sample_count=40
+metadata_path=/private/tmp/vla_drive_nuscenes_mini/metadata.jsonl
+future_steps=8
+sample_stride=2
+```
+
+DataLoader 검증:
+
+```text
+len=40
+front_exists=True
+batch_images=(4, 3, 64, 64)
+batch_waypoints=(4, 8, 2)
+```
+
+동일 metric 비교:
+
+```text
+CARLA-trained checkpoint:
+ade=5.945708167552948
+fde=10.292439889907836
+route_deviation=0.6837800443172455
+collision_proxy_rate=1.0
+
+nuScenes tiny checkpoint:
+ade=1.8858193516731263
+fde=4.195649659633636
+route_deviation=0.644213505834341
+collision_proxy_rate=0.85
+```
+
+Report files:
+
+```text
+outputs/reports/m9_nuscenes_carla_checkpoint_open_loop.json
+outputs/reports/m9_nuscenes_tiny_checkpoint_open_loop.json
+outputs/reports/m9_nuscenes_checkpoint_comparison.json
+```
+
+주의: nuScenes tiny checkpoint는 같은 40-sample subset에서 20 epoch smoke overfit으로 만든 것이므로 held-out benchmark가 아니다. 목적은 MacBook에서 non-CARLA dataset conversion, DataLoader, training, open-loop evaluation code path가 한 번에 연결되는지 확인하는 것이다.
+
+full nuScenes 변환은 아직 진행하지 않는다. mini tar에서 JSON table을 읽고 선택 이미지만 추출하는 범위는 MacBook에서 가능했지만, full 변환은 image extraction/storage/train-eval 반복 시간이 커져 5090 handoff 근거가 필요하다.
+
+M9 상태는 `[x]`로 갱신했다. 다음 구현 대상은 M10 5090 handoff package다.
+
+검증:
+
+```text
+.conda/bin/python -m py_compile scripts/prepare_nuscenes.py
+git diff --check
+MPLCONFIGDIR=.matplotlib_cache .conda/bin/python -m pytest -m 'not slow'
+```
+
+결과:
+
+```text
+15 passed, 2 deselected
+```
+
+## 2026-05-31: M10 5090 Handoff Package 완료
+
+MacBook에서 검증한 code path를 RTX 5090으로 넘기기 위한 manifest 생성 스크립트와 첫 실행 command set을 추가했다.
+
+구현 내용:
+
+- `scripts/export_handoff_bundle.sh`: git commit/status, MacBook report 요약, offline path 점검, 5090 첫 실행 command를 `outputs/handoff/5090_manifest.json`으로 기록한다.
+- `docs/setup.md`: RTX 5090 첫 smoke command set을 기록했다.
+- `docs/experiments.md`: E07 5090 handoff smoke의 전환 사유와 실행 순서를 기록했다.
+
+Manifest 생성:
+
+```text
+MANIFEST_PATH=outputs/handoff/5090_manifest.json scripts/export_handoff_bundle.sh
+```
+
+결과:
+
+```text
+HANDOFF_MANIFEST_OK
+manifest_path=outputs/handoff/5090_manifest.json
+```
+
+Manifest에 기록된 MacBook 근거:
+
+```text
+M8 scale envelope:
+run_count=16
+successful_count=16
+failed_count=0
+best_by_ade=action_token_i64_n10
+collection_status=ok
+collection_successful_count=1
+closed_loop_status=ok
+closed_loop_successful_count=2
+
+M9 nuScenes mini:
+delta_tiny_minus_carla ADE=-4.059888815879821
+delta_tiny_minus_carla FDE=-6.0967902302742
+```
+
+Offline path 점검에서 `data/offline/wheels/linux-x86_64-cu12`는 현재 MacBook repo에는 없다. 5090 환경에서는 online install 또는 별도 Linux/CUDA wheelhouse 준비가 필요하다. 다른 핵심 path인 Qwen2.5-VL-3B, nuScenes mini, Bench2Drive mini, CARLA config는 존재한다.
+
+전환 방침:
+
+- RTX 5090은 larger CARLA route/weather collection, CUDA LoRA/QLoRA, higher image size, repeated open/closed-loop evaluation을 위한 다음 장비다.
+- H100은 아직 사용하지 않는다. 5090에서 MacBook-equivalent smoke를 먼저 재현하고, 리소스 한계가 나오면 batch/image/model/LoRA/quantization/offload 축소를 먼저 시도한다.
+
+M10 상태는 `[x]`로 갱신했다. 다음 구현 대상은 M11 RTX 5090 Expansion이며, 실제 5090 장비가 필요하다.
+
+검증:
+
+```text
+bash -n scripts/export_handoff_bundle.sh
+MANIFEST_PATH=outputs/handoff/5090_manifest.json scripts/export_handoff_bundle.sh
+git diff --check
+MPLCONFIGDIR=.matplotlib_cache .conda/bin/python -m pytest -m 'not slow'
+```
+
+결과:
+
+```text
+HANDOFF_MANIFEST_OK
+15 passed, 2 deselected
+```
+
+## 2026-05-31: M10A MacBook CARLA Dataset and VLA Training Extension 완료
+
+5090 handoff 전에 MacBook에서 더 할 수 있는 작업이 남아 있었으므로, 추가 CARLA dataset 수집과 VLA 학습 smoke를 먼저 수행했다.
+
+Mac readiness:
+
+```text
+result: no blocking issues
+MPS is available
+free disk space: 88.1GiB
+offline cache: 84.9GiB / 120GiB
+```
+
+CARLA dataset 수집:
+
+```text
+config=src/vla_drive/configs/carla_mac_dataset.yaml
+output=/private/tmp/vla_drive_carla/mac_dataset_60s_320x180
+seconds=60
+resolution=320x180
+frames=600
+disk_usage=57M
+metadata=/private/tmp/vla_drive_carla/mac_dataset_60s_320x180/metadata.jsonl
+```
+
+DataLoader 확인:
+
+```text
+len=600
+first_image_exists=True
+last_image_exists=True
+batch_images=(8, 3, 64, 64)
+batch_waypoints=(8, 8, 2)
+```
+
+Mac MPS 학습 결과:
+
+```text
+reasoning_aux:
+max_samples=300
+epochs=5
+steps=190
+loss=15.661927 -> 1.794994
+open_loop ADE=1.662644
+open_loop FDE=3.413585
+
+action_token:
+max_samples=300
+epochs=5
+steps=190
+loss=4.184484 -> 3.272334
+open_loop ADE=1.884458
+open_loop FDE=3.807930
+```
+
+Qwen2.5-VL VLA smoke:
+
+```text
+frozen_vlm:
+model=Qwen2.5-VL-3B-Instruct
+device=mps
+max_samples=2
+epochs=1
+steps=2
+loss=12.562702 -> 11.732220
+open_loop ADE=4.811620
+open_loop FDE=3.496264
+
+lora_vlm:
+model=Qwen2.5-VL-3B-Instruct
+device=mps
+lora_rank=2
+lora_alpha=4
+max_samples=1
+epochs=1
+steps=1
+loss=12.933957 -> 12.933957
+open_loop ADE=7.549566
+open_loop FDE=11.681428
+```
+
+Report files:
+
+```text
+outputs/reports/m10_mac_carla_60s_reasoning_aux_open_loop.json
+outputs/reports/m10_mac_carla_60s_action_token_open_loop.json
+outputs/reports/m10_mac_carla_60s_frozen_vlm_open_loop.json
+outputs/reports/m10_mac_carla_60s_lora_vlm_open_loop.json
+outputs/reports/m10_mac_carla_60s_vla_training_summary.json
+```
+
+Evaluator update:
+
+- `frozen_vlm`과 `lora_vlm` checkpoint도 open-loop evaluator에서 로딩 가능하도록 추가했다.
+
+Mac 한계:
+
+- Qwen2.5-VL frozen VLM은 2 sample smoke 학습/평가가 가능했다.
+- LoRA VLM도 1 step smoke와 1 sample 평가가 가능했다.
+- 다만 Mac bitsandbytes는 GPU 기능 없이 설치되어 있고 `cadam32bit` 경고를 출력한다. LoRA는 실행 가능성 확인 수준이며, 의미 있는 반복 학습은 매우 느리다.
+- 따라서 다음 Mac 실험은 dataset 크기/route 다양성 확장과 dummy/reasoning/action-token 반복 평가가 우선이고, full LoRA 반복은 5090 확장 후보로 남긴다.
+
+M10A 상태는 `[x]`로 추가했다. M11은 여전히 5090 장비에서만 진행한다.
+
+검증:
+
+```text
+.conda/bin/python -m py_compile scripts/prepare_nuscenes.py src/vla_drive/evaluation/evaluator.py
+git diff --check
+MPLCONFIGDIR=.matplotlib_cache .conda/bin/python -m pytest -m 'not slow'
+MANIFEST_PATH=outputs/handoff/5090_manifest.json scripts/export_handoff_bundle.sh
+```
+
+결과:
+
+```text
+15 passed, 2 deselected
+HANDOFF_MANIFEST_OK
+```
+
+handoff manifest에도 M10A Mac CARLA/VLA 결과를 추가했다.
+
+## 2026-05-31: M10B User-Editable Mac Command Launchers 완료
+
+사용자가 command 파일 상단 변수만 수정해서 CARLA dataset 수집과 VLA 학습을 반복 실행할 수 있도록 launcher를 확장했다.
+
+구현 내용:
+
+- `launchers/06_데이터수집.command` 추가
+  - `SCENE_COUNT`, `SECONDS_PER_SCENE`, `FPS`, `IMAGE_WIDTH`, `IMAGE_HEIGHT`, `TARGET_SPEED_MPS`, `ROUTE_LENGTH`, `TOWN`, `WEATHER`, `OUTPUT_ROOT`를 파일 상단에서 수정한다.
+  - CARLA port를 최대 `WAIT_FOR_CARLA_SECONDS=420`초 기다린다.
+  - scene 실패 시 `SCENE_RETRY_COUNT`만큼 재시도한다.
+- `scripts/collect_carla_scenes.sh` 추가
+  - scene별 output은 `scene_000`, `scene_001` 형식으로 저장한다.
+  - 전체 metadata는 `${OUTPUT_ROOT}/metadata.jsonl`로 합친다.
+- `scripts/collect_carla_data.py` 확장
+  - CLI에서 `--seconds`, `--fps`, `--image-width`, `--image-height`, `--target-speed-mps`, `--route-length`, `--town`, `--weather`, `--spawn-seed`를 override할 수 있다.
+- `launchers/03_학습.command` 확장
+  - `dummy_overfit`, `reasoning_aux`, `action_token`, `frozen_vlm`, `lora_vlm` stage를 파일 상단에서 선택한다.
+  - epoch, batch size, max samples, lr, weight decay, grad accumulation, loss weight, early stopping, resume, model path, LoRA rank/alpha를 노출했다.
+- `src/vla_drive/training/train.py` 확장
+  - `--early-stop-patience`, `--early-stop-min-delta`, `--early-stop-min-epochs` 추가.
+  - best epoch를 `best.pt`로 저장하고 summary에 `best_loss`, `stopped_early`를 기록한다.
+- `scripts/train_lora.sh` 확장
+  - launcher에서 넘기는 optimizer/early-stop/full VLM 관련 옵션을 argparse로 전달한다.
+- `launchers/README.md` 갱신
+
+검증:
+
+```text
+chmod +x scripts/collect_carla_scenes.sh launchers/06_데이터수집.command launchers/03_학습.command
+bash -n scripts/collect_carla_scenes.sh
+bash -n launchers/06_데이터수집.command
+bash -n launchers/03_학습.command
+.conda/bin/python -m py_compile scripts/collect_carla_data.py src/vla_drive/training/train.py
+```
+
+Early stopping smoke:
+
+```text
+STAGE=dummy_overfit
+METADATA_PATH=/private/tmp/vla_drive_carla/mac_dataset_60s_320x180/metadata.jsonl
+EPOCHS=3
+MAX_SAMPLES=16
+BATCH_SIZE=4
+EARLY_STOP_PATIENCE=1
+EARLY_STOP_MIN_DELTA=1000
+EARLY_STOP_MIN_EPOCHS=1
+```
+
+결과:
+
+```text
+TRAINING_OK
+stopped_early=True
+best_checkpoint=/private/tmp/vla_drive_early_stop_smoke_ckpt/best.pt
+steps=8
+```
+
+CARLA 수집 smoke:
+
+```text
+SCENE_COUNT=1
+SECONDS_PER_SCENE=1
+FPS=5
+IMAGE=160x90
+OUTPUT_ROOT=/private/tmp/vla_drive_carla/command_collect_smoke
+```
+
+결과:
+
+```text
+RuntimeError: time-out of 30000ms while waiting for the simulator
+```
+
+원인:
+
+- `127.0.0.1:2000` port는 열려 있었지만 `02_카를라연결확인.command`도 timeout이 발생했다.
+- 즉 CARLA process는 살아 있으나 Python client에 world load 응답을 주지 않는 hung server 상태였다.
+
+대응:
+
+- 수집 script에 port wait와 scene retry를 추가했다.
+- 이 상태에서는 `01_카를라실행.command`로 CARLA를 재시작한 뒤 `06_데이터수집.command`를 실행해야 한다.
+
+M10B 상태는 `[x]`로 추가했다.

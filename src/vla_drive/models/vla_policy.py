@@ -5,6 +5,7 @@ import torch
 from torch import nn
 
 from vla_drive.models.action_token_head import ActionTokenHead
+from vla_drive.models.reasoning_head import ReasoningHead
 from vla_drive.models.waypoint_head import WaypointHead
 
 
@@ -19,6 +20,23 @@ class VLADrivingPolicy(nn.Module):
         return {"future_waypoints_ego": self.waypoint_head(hidden)}
 
 
+class ReasoningAuxPolicy(nn.Module):
+    """Waypoint policy with an auxiliary driving-reason classifier."""
+
+    def __init__(self, backbone, hidden_dim: int, waypoint_count: int, num_reasoning_labels: int) -> None:
+        super().__init__()
+        self.backbone = backbone
+        self.waypoint_head = WaypointHead(hidden_dim, waypoint_count)
+        self.reasoning_head = ReasoningHead(hidden_dim, num_reasoning_labels)
+
+    def forward(self, batch):
+        hidden = self.backbone.encode(batch)
+        return {
+            "future_waypoints_ego": self.waypoint_head(hidden),
+            "reasoning_logits": self.reasoning_head(hidden),
+        }
+
+
 def build_dummy_policy(hidden_dim: int = 64, waypoint_count: int = 8) -> VLADrivingPolicy:
     from vla_drive.models.backbone_vlm import DummyDrivingBackbone
 
@@ -26,6 +44,21 @@ def build_dummy_policy(hidden_dim: int = 64, waypoint_count: int = 8) -> VLADriv
         backbone=DummyDrivingBackbone(hidden_dim=hidden_dim),
         hidden_dim=hidden_dim,
         waypoint_count=waypoint_count,
+    )
+
+
+def build_reasoning_aux_policy(
+    hidden_dim: int = 64,
+    waypoint_count: int = 8,
+    num_reasoning_labels: int = 4,
+) -> ReasoningAuxPolicy:
+    from vla_drive.models.backbone_vlm import DummyDrivingBackbone
+
+    return ReasoningAuxPolicy(
+        backbone=DummyDrivingBackbone(hidden_dim=hidden_dim),
+        hidden_dim=hidden_dim,
+        waypoint_count=waypoint_count,
+        num_reasoning_labels=num_reasoning_labels,
     )
 
 

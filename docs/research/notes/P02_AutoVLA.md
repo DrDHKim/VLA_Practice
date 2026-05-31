@@ -98,5 +98,5 @@ w = λ_cot=40  if CoT in GT,  else 1
 
 - **GRPO/RFT**: closed-loop metric이 안정된 뒤에만 도입. MacBook smoke phase에서는 금지
 - **72B teacher 모델**: 현재 Mac 환경에서 실행 불가. reasoning annotation은 GPT API나 local 7B로 대체
-- **8-camera multi-view**: 현재 front RGB 단일 카메라로 시작. multi-view는 RTX 5090 이후
+- **8-camera multi-view**: 현재 front RGB 단일 카메라로 시작. multi-view는 MacBook에서 가능한 단일/소규모 카메라 실험 한계가 확인된 뒤 RTX 5090에서 확장
 - **nuPlan 120h 전체**: 현재 CARLA 데이터 우선. nuPlan은 Phase C 이후 검토

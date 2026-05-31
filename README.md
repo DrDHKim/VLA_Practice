@@ -6,7 +6,7 @@
 
 - CARLA 폐쇄 루프에서 동작하는 VLA 기반 자율주행 에이전트 구현
 - nuScenes, NAVSIM, Bench2Drive/CARLA를 단계적으로 사용
-- 오픈 모델을 우선 활용하고, MacBook에서 작은 end-to-end 시범 루프를 먼저 만든 뒤 RTX 5090 32GB에서 중간 규모로 확장
+- 오픈 모델을 우선 활용하고, MacBook에서 가능한 end-to-end 실험을 최대한 수행한 뒤 리소스 한계가 확인될 때 RTX 5090 32GB로 확장
 - 회사 AIP/H100 2장은 최후의 확장 선택지로만 사용한다. 코드 반출이 불가능하므로, AIP로 들어가는 순간 이후 개발/실험은 회사 환경에 고정된다는 제약이 있다.
 
 ## 현재 권장 전략
@@ -22,7 +22,7 @@
 
 3. **대형 기준선: NVIDIA Alpamayo**
    - 10B급 open reasoning VLA이며 자율주행 장기 방향을 보기 좋다.
-   - MacBook에서는 tiny smoke run, RTX 5090 32GB에서는 inference/LoRA/오프로딩 검증 중심으로 보고, 더 큰 학습은 AIP/H100 진입 조건을 만족한 뒤 판단한다.
+   - MacBook에서는 tiny smoke에서 시작해 가능한 inference/LoRA/오프로딩 검증까지 수행하고, 리소스 한계가 확인될 때 RTX 5090 32GB로 확장한다. 더 큰 학습은 RTX 5090에서도 한계가 확인된 뒤 AIP/H100 진입 조건에 따라 판단한다.
 
 4. **당장 구현 가능한 최소 시스템**
    - CARLA RGB 카메라 + ego state + route command 입력
@@ -30,13 +30,19 @@
    - action head는 waypoint regression으로 시작
    - 추론은 `throttle`, `steer`, `brake` 직접 출력보다 future waypoints 출력 후 PID/MPC controller로 변환
 
+## 하드웨어 전환 원칙
+
+이 프로젝트는 장비를 단순히 `tiny -> medium -> large`로 고정하지 않는다. 기본 원칙은 **현재 장비에서 할 수 있는 것을 모두 해보고, 리소스 한계가 실험 로그로 확인될 때 다음 장비로 넘어가는 것**이다.
+
+전환 전에는 먼저 batch size, image size, route length, traffic density, model size, LoRA rank, quantization, gradient accumulation, CPU offload 같은 축소/최적화를 시도한다. 그래도 목표 실험이 불가능할 때만 다음 장비로 승급한다.
+
 ## 하드웨어별 역할
 
 | 환경 | 역할 | 하지 말 것 |
 | --- | --- | --- |
-| MacBook | 전체 파이프라인의 소규모 시범: CARLA 데이터 수집, tiny/small 학습, open/closed-loop 평가, 문서화/코딩 | 장시간/대량 학습, 대규모 route sweep |
-| 집 데스크탑 RTX 5090 32GB | 같은 파이프라인의 중간 규모 실행: CARLA 수집량 확대, LoRA/QLoRA, 평가 반복 | 10B 이상 full fine-tuning |
-| 회사 AIP/H100 x2 | Mac/5090에서 검증된 파이프라인의 대규모 확장, 장시간 ablation, 대형 모델 실험 | 초기 탐색. 코드 반출 제약 때문에 너무 일찍 들어가지 말 것 |
+| MacBook | 기본 개발/검증 장비. CARLA 데이터 수집, tiny/small 학습, open/closed-loop 평가, command launcher, 문서화/코딩을 가능한 범위까지 수행 | 실패 원인을 확인하지 않고 5090으로 넘기기 |
+| 집 데스크탑 RTX 5090 32GB | MacBook에서 리소스 한계가 확인된 실험의 확장. 더 큰 CARLA 수집, LoRA/QLoRA, 반복 평가, 큰 image/model/batch 검증 | MacBook에서 가능한 축소 실험을 건너뛰기, 10B 이상 full fine-tuning |
+| 회사 AIP/H100 x2 | 5090에서도 리소스 한계가 확인된 최종 확장. 대규모 LoRA/QLoRA, 장시간 ablation, 대형 teacher/reference 실험 | 초기 탐색. 코드 반출 제약 때문에 너무 일찍 들어가기 |
 
 ## 폴더 구조
 
@@ -150,9 +156,9 @@
 ### Phase 5: 모델 확장
 
 - OpenDriveVLA/AutoVLA 구조를 참고해 action tokenization, reasoning supervision, RL fine-tuning을 추가한다.
-- MacBook에서 먼저 데이터 수집-학습-평가의 최소 루프를 확인한다.
-- RTX 5090에서 같은 루프를 중간 규모로 확장하고, OOM이면 gradient checkpointing, 4-bit quantization, CPU offload를 먼저 시도한다.
-- AIP/H100은 최종 대규모 학습/ablation이 명확해진 뒤에만 사용한다.
+- MacBook에서 먼저 데이터 수집-학습-평가 루프를 가능한 수준까지 키운다.
+- MacBook에서 리소스 한계가 확인되면 RTX 5090에서 같은 루프를 확장하고, OOM이면 gradient checkpointing, 4-bit quantization, CPU offload를 먼저 시도한다.
+- RTX 5090에서도 리소스 한계나 최종 대규모 ablation 필요성이 명확할 때만 AIP/H100을 사용한다.
 
 ## 중요 원칙
 
@@ -165,7 +171,7 @@
 
 1. `scripts/download_papers.sh`를 실행해 주요 논문 PDF를 저장한다.
 2. `docs/setup.md`를 보고 오프라인 작업용 모델/데이터/패키지를 미리 받는다.
-3. `docs/setup.md`에 맞춰 MacBook에서는 MPS/CPU smoke run, 5090에서는 CUDA 중간 규모 run, AIP/H100에서는 최종 확장 run을 구분한다.
+3. `docs/setup.md`에 맞춰 MacBook에서 가능한 실험을 먼저 끝까지 밀고, 리소스 한계가 확인될 때만 5090/AIP로 전환한다.
 4. `src/vla_drive/simulation/`부터 구현해 CARLA 데이터 수집 루프를 MacBook에서 먼저 완성한다.
 5. `src/vla_drive/models/`의 TODO를 채워 waypoint prediction baseline을 만든다.
 

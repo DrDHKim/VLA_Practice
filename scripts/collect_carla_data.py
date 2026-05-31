@@ -276,11 +276,44 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Collect a tiny CARLA RGB waypoint dataset.")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--output-root", type=Path, default=None)
+    parser.add_argument("--seconds", type=float, default=None)
+    parser.add_argument("--fps", type=float, default=None)
+    parser.add_argument("--image-width", type=int, default=None)
+    parser.add_argument("--image-height", type=int, default=None)
+    parser.add_argument("--target-speed-mps", type=float, default=None)
+    parser.add_argument("--route-length", type=int, default=None)
+    parser.add_argument("--town", type=str, default=None)
+    parser.add_argument("--weather", type=str, default=None)
+    parser.add_argument("--spawn-seed", type=int, default=None)
     args = parser.parse_args()
 
     config = _load_config(args.config)
+    _apply_cli_overrides(config, args)
     metadata_path = collect(config, output_root=args.output_root)
     print(json.dumps({"metadata_path": str(metadata_path)}, sort_keys=True))
+
+
+def _apply_cli_overrides(config: dict[str, Any], args: argparse.Namespace) -> None:
+    sim_cfg = config.setdefault("simulation", {})
+    collect_cfg = config.setdefault("collection", {})
+    if args.seconds is not None:
+        collect_cfg["seconds"] = args.seconds
+    if args.fps is not None:
+        collect_cfg["fps"] = args.fps
+    if args.image_width is not None:
+        collect_cfg["image_width"] = args.image_width
+    if args.image_height is not None:
+        collect_cfg["image_height"] = args.image_height
+    if args.target_speed_mps is not None:
+        collect_cfg["target_speed_mps"] = args.target_speed_mps
+    if args.route_length is not None:
+        collect_cfg["route_length"] = args.route_length
+    if args.town is not None:
+        sim_cfg["town"] = args.town
+    if args.weather is not None:
+        sim_cfg["weather"] = args.weather
+    if args.spawn_seed is not None:
+        random.seed(args.spawn_seed)
 
 
 if __name__ == "__main__":

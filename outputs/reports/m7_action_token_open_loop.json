@@ -1,0 +1,10 @@
+{
+  "ade": 0.5860463201999664,
+  "checkpoint_path": "/private/tmp/vla_drive_test/action_token/latest.pt",
+  "collision_proxy_rate": 0.0,
+  "fde": 0.5834009408950805,
+  "metadata_path": "/private/tmp/vla_drive_carla/m1_smoke/metadata.jsonl",
+  "route_deviation": 0.04669791907072067,
+  "sample_count": 20,
+  "stage": "action_token"
+}

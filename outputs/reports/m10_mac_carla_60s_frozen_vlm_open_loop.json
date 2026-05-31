@@ -1,0 +1,11 @@
+{
+  "ade": 4.811619520187378,
+  "checkpoint_path": "/private/tmp/vla_drive_mac_frozen_vlm_smoke_ckpt/latest.pt",
+  "collision_proxy_rate": 1.0,
+  "fde": 3.4962637424468994,
+  "metadata_path": "/private/tmp/vla_drive_carla/mac_dataset_60s_320x180/metadata.jsonl",
+  "reasoning_mode": "fast",
+  "route_deviation": 0.7659685015678406,
+  "sample_count": 2,
+  "stage": "frozen_vlm"
+}

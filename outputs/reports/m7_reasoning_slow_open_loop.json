@@ -1,0 +1,11 @@
+{
+  "ade": 7.201081943511963,
+  "checkpoint_path": "/private/tmp/vla_drive_reasoning_slow/latest.pt",
+  "collision_proxy_rate": 1.0,
+  "fde": 11.119636535644531,
+  "metadata_path": "/private/tmp/vla_drive_carla/m1_smoke/metadata.jsonl",
+  "reasoning_mode": "slow",
+  "route_deviation": 0.06344057023525237,
+  "sample_count": 20,
+  "stage": "reasoning_aux"
+}

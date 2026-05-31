@@ -9,12 +9,13 @@
 - 한 번에 하나의 milestone만 진행할 것.
 - internet이 필요하면 `BLOCKED: needs internet`로 표시하고 다음 offline-safe task로 넘어갈 것.
 - CARLA loop가 동작하기 전에는 모델 학습 코드를 키우지 말 것.
-- 모든 기능은 MacBook tiny smoke run을 먼저 통과한 뒤 RTX 5090 medium run으로 확장할 것.
-- AIP/H100은 MacBook과 RTX 5090에서 data collection, training, evaluation loop가 검증된 뒤에만 사용할 것.
+- 모든 기능은 먼저 MacBook에서 가능한 범위까지 구현/검증한다. 단순히 milestone이 끝났다는 이유만으로 RTX 5090으로 넘어가지 않는다.
+- RTX 5090 전환은 MacBook에서 같은 code path를 유지한 채 batch/image/model/route/traffic 규모를 줄여도 리소스 한계가 명확할 때만 허용한다. 전환 사유는 `docs/experiments.md` 또는 연구일지에 남긴다.
+- AIP/H100 전환도 RTX 5090에서 같은 방식으로 가능한 최적화와 축소 실험을 모두 시도한 뒤, 리소스 한계나 대규모 ablation 필요성이 명확할 때만 허용한다.
 - 10B급 model full fine-tuning은 금지. LoRA/QLoRA만 허용.
 - 작업을 끝내면 완료 기준을 실제로 확인하고 상태를 바꿀 것.
 - MacBook 작업 시작 전 `.conda/bin/python scripts/check_mac_readiness.py`를 실행하고, `[FAIL]`이 있으면 먼저 해결할 것.
-- CARLA server는 Mac 공식 지원을 전제하지 말 것. 이 Mac에서는 CrossOver 64-bit bottle + D3DMetal + Windows CARLA 0.9.15로 RGB camera frame과 `127.0.0.1:2000` port open까지 검증했지만, 불안정하면 Linux/Windows host 또는 remote-run 방식으로 전환할 것.
+- CARLA server는 Mac 공식 지원을 전제하지 말 것. 이 Mac에서는 CrossOver 64-bit bottle + D3DMetal + Windows CARLA 0.9.15로 RGB camera frame과 `127.0.0.1:2000` port open까지 검증했다. 불안정하더라도 먼저 Mac에서 가능한 축소/우회 설정을 시도하고, 그 한계를 기록한 뒤 Linux/Windows host 또는 remote-run 방식으로 전환한다.
 
 ## 상태 표시
 
@@ -52,8 +53,8 @@
 
 목표:
 
-- MacBook tiny smoke run부터 CARLA 서버에 연결하고, 차량과 센서를 spawn하고, rule-based route를 따라 주행하며 데이터를 저장할 준비를 한다. CARLA server는 `scripts/run_carla_mac_crossover.sh`로 켠 local CrossOver/D3DMetal server를 우선 사용하되, 같은 config로 remote Linux/Windows host도 허용한다.
-- 같은 코드는 이후 RTX 5090과 AIP/H100에서 규모만 키워 재사용한다.
+- MacBook에서 tiny smoke부터 시작해 가능한 범위까지 CARLA 서버에 연결하고, 차량과 센서를 spawn하고, rule-based route를 따라 주행하며 데이터를 저장할 준비를 한다. CARLA server는 `scripts/run_carla_mac_crossover.sh`로 켠 local CrossOver/D3DMetal server를 우선 사용하되, Mac 리소스 한계가 기록된 경우 같은 config로 remote Linux/Windows host도 허용한다.
+- 같은 코드는 이후 리소스 한계가 확인된 시점에 RTX 5090과 AIP/H100에서 규모만 키워 재사용한다.
 
 단계:
 
@@ -225,7 +226,7 @@
 
 ## M7: Research Extensions
 
-상태: `[~]`
+상태: `[x]`
 
 파일:
 
@@ -239,13 +240,236 @@
 
 단계:
 
-1. waypoint regression baseline을 고정한다.
-2. trajectory action tokenizer를 구현한다.
-3. reasoning auxiliary target을 추가한다.
-4. fast/slow reasoning mode를 실험한다.
+1. `[x]` waypoint regression baseline을 고정한다.
+2. `[x]` trajectory action tokenizer를 구현한다.
+3. `[x]` reasoning auxiliary target을 추가한다.
+4. `[x]` fast/slow reasoning mode를 실험한다.
 5. RL fine-tuning은 closed-loop metric이 안정된 뒤만 검토한다.
 
 완료 기준:
 
-- regression baseline과 tokenized-action baseline을 같은 metric으로 비교한다.
-- 실험 결과가 `outputs/reports/`에 저장된다.
+- `[x]` regression baseline과 tokenized-action baseline을 같은 metric으로 비교한다.
+- `[x]` 실험 결과가 `outputs/reports/`에 저장된다.
+- `[x]` fast/slow reasoning mode의 최소 smoke 비교를 추가한다.
+
+다음 구현 대상: `M8: MacBook Scale Envelope`
+
+## M8: MacBook Scale Envelope
+
+상태: `[x]`
+
+파일:
+
+- `scripts/run_mac_scale_sweep.sh`
+- `src/vla_drive/configs/carla_rgb_waypoint.yaml`
+- `docs/experiments.md`
+- `docs/research_journal.md`
+
+목표:
+
+- 5090으로 넘어가기 전에 MacBook에서 가능한 CARLA 수집/학습/평가 범위를 계량한다.
+- 단순히 “느리다”가 아니라 route 수, route 시간, image size, sample 수, batch size, model stage별 성공/실패 증거를 남긴다.
+
+단계:
+
+1. `[x]` MacBook readiness와 free disk를 기록한다.
+2. `[x]` CARLA collection scale sweep을 만든다: route count, route seconds, image size, weather.
+3. `[x]` training scale sweep을 만든다: `dummy_overfit`, `reasoning_aux`, `action_token`, 가능하면 `frozen_vlm`.
+4. `[x]` open-loop evaluation을 모든 checkpoint에 같은 metric으로 실행한다.
+5. `[x]` closed-loop evaluation은 1 route -> 5 route -> 가능한 route 수 순서로 늘린다.
+6. `[x]` 실패하면 batch/image/route/model을 줄여 재시도하고 전환 기록 양식에 남긴다.
+
+완료 기준:
+
+- `outputs/reports/mac_scale_envelope.json`에 성공한 최대 설정과 실패한 최소 설정이 저장된다.
+- 5090 전환이 필요하면 `docs/experiments.md`의 장비 전환 기록 양식이 채워진다.
+- 전환이 아직 필요 없으면 다음 MacBook 실험 범위가 명확히 적힌다.
+
+다음 구현 대상: `M9: Dataset Expansion on Mac`
+
+## M9: Dataset Expansion on Mac
+
+상태: `[x]`
+
+파일:
+
+- `scripts/prepare_nuscenes.py`
+- `src/vla_drive/data/datasets.py`
+- `src/vla_drive/data/schemas.py`
+- `src/vla_drive/configs/nuscenes_open_loop.yaml`
+- `docs/data.md`
+
+목표:
+
+- MacBook에서 가능한 범위로 CARLA 외 dataset path를 common schema에 연결한다.
+- full dataset으로 바로 가지 않고, nuScenes mini 또는 Bench2Drive mini의 작은 subset을 JSONL/image path 기반으로 변환한다.
+
+단계:
+
+1. `[x]` nuScenes mini 또는 Bench2Drive mini 중 offline asset이 준비된 쪽을 먼저 선택한다.
+2. `[x]` 10-100 sample subset을 `DrivingSample` JSONL로 변환한다.
+3. `[x]` route command 또는 scene prompt mapping을 문서화한다.
+4. `[x]` open-loop evaluator가 변환된 JSONL에서 동작하게 한다.
+5. `[x]` CARLA-trained checkpoint와 dataset-specific tiny checkpoint를 같은 metric으로 비교한다.
+
+완료 기준:
+
+- 변환된 mini JSONL을 DataLoader가 읽는다.
+- open-loop report가 `outputs/reports/`에 저장된다.
+- MacBook에서 full 변환이 불가능하면 용량/시간 한계를 기록한다.
+
+## M10: 5090 Handoff Package
+
+상태: `[x]`
+
+파일:
+
+- `scripts/export_handoff_bundle.sh`
+- `docs/setup.md`
+- `docs/experiments.md`
+- `docs/research_journal.md`
+
+목표:
+
+- MacBook에서 가능한 실험을 모두 수행한 뒤에만 5090으로 넘길 수 있는 재현 bundle을 만든다.
+- 코드, config, command, report, 전환 사유가 한 묶음으로 남아야 한다.
+
+단계:
+
+1. `[x]` MacBook scale envelope report를 확인한다.
+2. `[x]` 5090에서 실행할 정확한 command set을 정한다.
+3. `[x]` 필요한 offline wheel/model/dataset path를 점검한다.
+4. `[x]` git status와 untracked artifact를 정리한다.
+5. `[x]` handoff manifest를 만든다: commit/hash, config, checkpoint, reports, expected commands.
+6. `[x]` 5090에서 첫 smoke command를 `docs/setup.md`에 기록한다.
+
+완료 기준:
+
+- `outputs/handoff/5090_manifest.json`이 생성된다.
+- MacBook에서 5090 전환 사유가 문서화되어 있다.
+- 5090에서 처음 실행할 data collection, training, open-loop, closed-loop command가 명시되어 있다.
+
+## M10A: MacBook CARLA Dataset and VLA Training Extension
+
+상태: `[x]`
+
+파일:
+
+- `src/vla_drive/configs/carla_mac_dataset.yaml`
+- `src/vla_drive/evaluation/evaluator.py`
+- `docs/research_journal.md`
+- `outputs/reports/m10_mac_carla_60s_vla_training_summary.json`
+
+목표:
+
+- 5090으로 넘어가기 전에 MacBook에서 CARLA dataset을 추가 수집하고, 가능한 VLA 학습 경로를 실제로 실행한다.
+
+단계:
+
+1. `[x]` Mac readiness를 다시 확인한다.
+2. `[x]` CrossOver CARLA에서 60초 이상 RGB/waypoint dataset을 수집한다.
+3. `[x]` 수집 JSONL을 DataLoader로 확인한다.
+4. `[x]` `reasoning_aux`와 `action_token`을 Mac MPS에서 학습하고 open-loop 평가한다.
+5. `[x]` Qwen2.5-VL frozen VLM smoke 학습과 open-loop 평가를 수행한다.
+6. `[x]` Qwen2.5-VL LoRA VLM 최소 smoke 학습과 open-loop 평가를 수행하고 Mac 한계를 기록한다.
+
+완료 기준:
+
+- MacBook 수집 dataset metadata가 600 sample 이상이다.
+- VLA 계열 checkpoint와 open-loop report가 생성된다.
+- frozen/LoRA VLM의 Mac 실행 가능 여부와 한계가 연구일지에 기록된다.
+
+## M10B: User-Editable Mac Command Launchers
+
+상태: `[x]`
+
+파일:
+
+- `launchers/03_학습.command`
+- `launchers/06_데이터수집.command`
+- `scripts/collect_carla_scenes.sh`
+- `scripts/collect_carla_data.py`
+- `scripts/train_lora.sh`
+- `src/vla_drive/training/train.py`
+- `launchers/README.md`
+- `docs/research_journal.md`
+
+목표:
+
+- Mac에서 사용자가 command 파일 상단 변수만 수정해 CARLA dataset 수집과 VLA 학습을 반복 실행할 수 있게 한다.
+
+단계:
+
+1. `[x]` 데이터 수집 command에 scene 수, scene별 시간, FPS, 해상도, route/weather/output root 변수를 노출한다.
+2. `[x]` scene별 output을 만들고 전체 `metadata.jsonl`을 합치는 수집 wrapper를 추가한다.
+3. `[x]` CARLA port 대기와 scene 재시도 옵션을 추가한다.
+4. `[x]` 학습 command에 full VLM 연결 stage(`frozen_vlm`, `lora_vlm`), epoch, early stopping, batch size, learning rate, gradient accumulation, resume 옵션을 노출한다.
+5. `[x]` training loop에 실제 early stopping과 `best.pt` 저장을 추가한다.
+6. `[x]` launcher README와 연구일지에 사용 방법과 검증 결과를 기록한다.
+
+완료 기준:
+
+- command/script 문법 검사가 통과한다.
+- early stopping smoke 학습이 동작한다.
+- CARLA가 응답하지 않는 경우 수집 script가 재시도하거나 명확히 실패한다.
+
+## M11: RTX 5090 Expansion
+
+상태: `[ ]`
+
+파일:
+
+- `docs/experiments.md`
+- `docs/research_journal.md`
+- `scripts/train_lora.sh`
+- `scripts/eval_open_loop.sh`
+- `scripts/eval_carla.sh`
+
+목표:
+
+- MacBook에서 검증된 같은 code path를 RTX 5090에서 확장한다.
+- 5090에서도 바로 H100으로 가지 않고, quantization/checkpointing/offload와 scale-down을 먼저 시도한다.
+
+단계:
+
+1. 5090 환경에서 unit test와 MacBook-equivalent smoke run을 통과시킨다.
+2. CARLA collection scale을 늘린다: route/weather/traffic/time.
+3. LoRA/QLoRA training을 반복한다.
+4. open-loop와 closed-loop report를 같은 schema로 저장한다.
+5. OOM 또는 시간 한계가 나오면 batch/image/model/LoRA rank/quantization/offload를 조정한다.
+6. H100 전환이 필요하면 전환 기록 양식을 채운다.
+
+완료 기준:
+
+- 5090 report가 `outputs/reports/`에 저장된다.
+- MacBook report와 같은 metric key로 비교 가능하다.
+- H100 전환 여부가 근거와 함께 결정된다.
+
+## M12: H100 Final Scale and Ablation
+
+상태: `[ ]`
+
+파일:
+
+- `docs/experiments.md`
+- `docs/research_journal.md`
+- `outputs/reports/`
+
+목표:
+
+- 5090에서도 리소스 한계가 확인된 실험만 H100에서 수행한다.
+- 회사 환경 lock-in을 감수할 가치가 있는 large LoRA/QLoRA, multi-dataset, ablation만 실행한다.
+
+단계:
+
+1. H100 진입 기준과 운영 리스크를 재확인한다.
+2. code snapshot과 experiment manifest를 archive한다.
+3. large training/ablation matrix를 실행한다.
+4. open-loop, closed-loop, failure taxonomy report를 생성한다.
+5. MacBook/5090 결과와 같은 metric schema로 비교한다.
+
+완료 기준:
+
+- H100 run의 목적, config, 결과, 비용/시간이 문서화된다.
+- MacBook -> 5090 -> H100 전체 ladder의 metric 비교표가 있다.
+- 다음 논문/보고서용 artifact가 분리되어 있다.

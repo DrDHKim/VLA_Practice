@@ -1,6 +1,6 @@
 # Mac CARLA 설치 문서
 
-이 문서는 Apple Silicon Mac에서 Windows CARLA 0.9.15를 RGB camera까지 동작시키는 clean install 절차다. CARLA의 공식 지원 경로는 Linux/Windows server이며, 이 Mac 경로는 MacBook tiny smoke run을 위한 experimental local server로만 사용한다.
+이 문서는 Apple Silicon Mac에서 Windows CARLA 0.9.15를 RGB camera까지 동작시키는 clean install 절차다. CARLA의 공식 지원 경로는 Linux/Windows server이며, 이 Mac 경로는 MacBook에서 가능한 CARLA 수집/평가를 먼저 수행하기 위한 experimental local server로 사용한다.
 
 검증 상태:
 
@@ -163,7 +163,7 @@ RGB camera가 실제 색을 내는지 확인하려면 CrossOver bottle의 Python
 
 ## 운영 기준
 
-- Mac에서는 tiny smoke route와 짧은 data collection만 수행한다.
-- 장시간 collection이나 큰 map sweep은 RTX 5090 또는 AIP/H100에서 수행한다.
+- Mac에서는 tiny smoke route에서 시작하고, 가능한 범위까지 route 수, collection 시간, image resolution을 확장한다.
+- Mac에서 렌더링 안정성, 시간, 메모리, 저장공간 한계가 확인되면 그 기록을 남긴 뒤 RTX 5090 또는 AIP/H100으로 확장한다.
 - 이 문서의 Mac local server가 불안정하면 `src/vla_drive/configs/carla_rgb_waypoint.yaml`의 host만 Linux/Windows CARLA server로 바꾼다.
 - CARLA archive와 extracted runtime은 `data/offline/`에 두되 git에는 commit하지 않는다.

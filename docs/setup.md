@@ -28,10 +28,11 @@ data/offline/wheels/macos-py310-pinned/      # pinned cp310/macOS arm64 wheelhou
 Scale ladder:
 
 ```text
-MacBook tiny run -> RTX 5090 medium run -> AIP/H100 large run
+MacBook 가능한 최대 검증 -> MacBook 리소스 한계 기록 -> RTX 5090 확장
+RTX 5090 가능한 최대 검증 -> RTX 5090 리소스 한계 기록 -> AIP/H100 확장
 ```
 
-모든 장비에서 pipeline은 같다: CARLA data collection, training, open-loop evaluation, closed-loop evaluation. 바뀌는 것은 route 수, dataset 크기, model 크기, image resolution, training 길이, batch size뿐이다.
+모든 장비에서 pipeline은 같다: CARLA data collection, training, open-loop evaluation, closed-loop evaluation. 장비가 바뀌어도 code path를 바꾸지 않고 route 수, dataset 크기, model 크기, image resolution, training 길이, batch size만 조정한다. 다음 장비로 넘어가는 이유는 항상 리소스 한계 또는 명확한 대규모 실험 필요성으로 남긴다.
 
 정리 기록:
 
@@ -42,9 +43,9 @@ MacBook tiny run -> RTX 5090 medium run -> AIP/H100 large run
 
 | 환경 | 역할 | 주요 용도 | 피할 것 |
 | --- | --- | --- | --- |
-| MacBook | end-to-end pilot + 중간 규모 inference | CARLA smoke data collection, training (3B/7B LoRA), open/closed-loop evaluation, 문서화, code editing, unit test | 장시간 대규모 route sweep, 10B full fine-tuning |
-| Desktop RTX 5090 | medium-scale execution | 더 큰 CARLA collection, LoRA/QLoRA, 반복 training/evaluation | 10B full fine-tuning |
-| Company AIP/H100 x2 | final scale-up | large LoRA, multi-dataset training, ablation | 초기 탐색 |
+| MacBook | 기본 개발/검증 장비 | CARLA data collection, CPU/MPS-safe training, open/closed-loop evaluation, 문서화, code editing, unit test | 리소스 한계 기록 없이 5090으로 넘기기, 10B full fine-tuning |
+| Desktop RTX 5090 | MacBook 한계 이후 확장 장비 | 더 큰 CARLA collection, LoRA/QLoRA, 반복 training/evaluation, 큰 image/model/batch 검증 | MacBook에서 가능한 축소/최적화 실험 건너뛰기, 10B full fine-tuning |
+| Company AIP/H100 x2 | RTX 5090 한계 이후 최종 확장 | large LoRA/QLoRA, multi-dataset training, ablation, teacher/reference run | 초기 탐색, 단순 편의성 때문에 사용 |
 
 ## MacBook Setup
 
@@ -60,6 +61,9 @@ MacBook 규칙:
 - `data/offline`은 120GB 아래로 유지한다.
 - 아래 Bundle A를 우선한다.
 - CARLA도 MacBook pilot path에 포함된다. 공식 지원 경로는 Linux/Windows server 또는 remote host지만, 이 Mac에서는 CrossOver 64-bit bottle + D3DMetal로 Windows CARLA 0.9.15 server 실행, `127.0.0.1:2000` port open, RGB camera frame까지 검증했다. 재현 절차는 `docs/carla_mac_setup.md`를 따른다.
+- Mac에서 먼저 가능한 route 수, image resolution, sample 수, tiny/small training, open/closed-loop 평가를 모두 시도한다.
+- Mac 리소스 한계가 나오면 batch size, image size, route length, traffic density, model size, LoRA rank, frozen backbone, CPU/MPS-safe mode를 줄여 다시 시도한다.
+- 그래도 불가능한 경우에만 5090 전환 사유를 연구일지 또는 `docs/experiments.md`에 남긴다.
 - 충분한 용량을 확인하기 전에는 Mac에서 큰 CARLA/dataset archive를 풀지 않는다.
 - user home cache에 쓸 수 없을 때는 matplotlib을 import하는 script 실행 시 `MPLCONFIGDIR=.matplotlib_cache`를 설정한다.
 
@@ -185,25 +189,80 @@ python -c "import transformers; print(transformers.__version__)"
 python -m pytest tests/unit
 ```
 
+첫 5090 smoke command set:
+
+```bash
+conda activate vla-drive-5090
+python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
+MPLCONFIGDIR=.matplotlib_cache python -m pytest -m 'not slow'
+
+python scripts/collect_carla_data.py \
+  --config src/vla_drive/configs/carla_rgb_waypoint.yaml \
+  --output-root /data/vla_drive/carla/e07_5090_smoke
+
+STAGE=reasoning_aux \
+METADATA_PATH=/data/vla_drive/carla/e07_5090_smoke/metadata.jsonl \
+EPOCHS=5 MAX_SAMPLES=200 BATCH_SIZE=4 IMAGE_SIZE=128 DEVICE=cuda \
+CHECKPOINT_DIR=checkpoints/e07_5090_reasoning_aux \
+LOG_DIR=outputs/logs/e07_5090_reasoning_aux \
+scripts/train_lora.sh
+
+CHECKPOINT_PATH=checkpoints/e07_5090_reasoning_aux/latest.pt \
+METADATA_PATH=/data/vla_drive/carla/e07_5090_smoke/metadata.jsonl \
+REPORT_PATH=outputs/reports/e07_5090_open_loop.json \
+BATCH_SIZE=8 IMAGE_SIZE=128 DEVICE=cuda \
+scripts/eval_open_loop.sh
+
+CARLA_HOST=127.0.0.1 CARLA_PORT=2000 ROUTE_COUNT=5 ROUTE_SECONDS=20 \
+REPORT_PATH=outputs/reports/e07_5090_closed_loop.json \
+scripts/eval_carla.sh
+```
+
+LoRA smoke는 위 reasoning_aux path가 통과한 뒤 실행한다.
+
+```bash
+STAGE=lora_vlm \
+METADATA_PATH=/data/vla_drive/carla/e07_5090_smoke/metadata.jsonl \
+EPOCHS=1 MAX_SAMPLES=64 BATCH_SIZE=1 IMAGE_SIZE=224 DEVICE=cuda \
+CHECKPOINT_DIR=checkpoints/e07_5090_lora \
+LOG_DIR=outputs/logs/e07_5090_lora \
+scripts/train_lora.sh
+```
+
+handoff manifest:
+
+```bash
+scripts/export_handoff_bundle.sh
+```
+
+output:
+
+```text
+outputs/handoff/5090_manifest.json
+```
+
 Memory 규칙:
 
-- MacBook smoke run code path를 그대로 재사용한다.
+- MacBook에서 리소스 한계가 확인된 code path를 그대로 재사용한다.
 - batch size 1부터 시작한다.
 - bf16을 사용한다.
 - LoRA를 먼저 사용한다.
 - gradient checkpointing을 켠다.
 - 필요하면 4-bit quantization을 사용한다.
 - architecture를 바꾸기 전에 image size를 줄인다.
+- RTX 5090에서도 리소스 한계가 나오면 batch/model/data 규모 축소와 offload/quantization을 먼저 시도하고, 그 뒤에만 H100 전환을 검토한다.
 - 10B full fine-tuning으로 시작하지 않는다.
 
 ## AIP/H100 진입 기준
 
-Company AIP/H100은 MacBook pilot과 RTX 5090 medium-scale pipeline이 안정된 뒤에만 사용한다.
+Company AIP/H100은 MacBook과 RTX 5090에서 가능한 실험을 모두 시도하고, RTX 5090 리소스 한계가 기록된 뒤에만 사용한다.
 
 진입 기준:
 
-- CARLA data collection이 MacBook smoke route와 RTX 5090 medium route에서 모두 동작한다.
-- open-loop training/evaluation이 MacBook scale에서 먼저 동작하고, 이후 RTX 5090 scale에서도 동작한다.
+- CARLA data collection이 MacBook에서 가능한 최대 범위와 RTX 5090 확장 범위에서 모두 동작한다.
+- open-loop training/evaluation이 MacBook에서 가능한 범위까지 먼저 동작하고, 이후 RTX 5090 scale에서도 동작한다.
+- RTX 5090에서 gradient checkpointing, quantization, CPU offload, batch/image/model 축소를 시도했다.
+- RTX 5090의 한계 또는 H100이 필요한 실험 목적이 report로 남아 있다.
 - migration 전에 closed-loop evaluation이 최소 5개 route에서 동작한다.
 - 정확한 experiment plan이 `docs/experiments.md`에 기록되어 있다.
 - 회사 환경에 들어가기 전 code snapshot을 archive한다.
@@ -221,7 +280,7 @@ AIP/H100에 쓰지 말 것:
 - 초기 CARLA debugging
 - 불안정한 data schema 작업
 - 시행착오성 dependency setup
-- quantization/checkpointing을 시도하기 전 단순 OOM 회피
+- MacBook/RTX 5090에서 가능한 축소 실험을 하기 전 단순 OOM 회피
 
 ## Offline 저장 구조
 
@@ -271,13 +330,13 @@ data/offline/
 | 순서 | 항목 | 예상 용량 | 이유 |
 | ---: | --- | ---: | --- |
 | 2.1 | Qwen2.5-VL-3B-Instruct | 7-10GB | 첫 VLA backbone |
-| 2.2 | target server용 CARLA runtime | Mac local 약 25-35GB | MacBook client smoke, RTX 5090 medium, AIP/H100 large run의 첫 closed-loop simulator |
+| 2.2 | target server용 CARLA runtime | Mac local 약 25-35GB | MacBook local run과 리소스 한계 이후 RTX 5090/AIP 확장의 첫 closed-loop simulator |
 | 2.3 | CARLA PythonAPI wheel/client package | 포함 또는 소용량 | Python script가 CARLA server와 통신하기 위해 필요 |
 
 CARLA note:
 
 - MacBook, RTX 5090, AIP/H100은 모두 같은 pipeline에서 CARLA를 사용한다.
-- MacBook은 CARLA client/control/data schema smoke run을 맡고, local CrossOver/D3DMetal server 또는 Linux/Windows remote server에 연결한다.
+- MacBook은 CARLA client/control/data schema run을 맡고, local CrossOver/D3DMetal server에서 가능한 범위까지 수행한다. 한계가 확인되면 Linux/Windows remote server에 연결한다.
 - Linux 전용 CARLA runtime은 desktop/server로 옮길 목적이 명확할 때만 Mac에 저장한다.
 - 현재 Mac offline cache에는 Windows CARLA 0.9.15 runtime과 AdditionalMaps가 있고, local Wine server는 port open까지 검증했다.
 
@@ -323,7 +382,7 @@ repo clones
 Mac Python 3.10 Miniconda installer
 Mac Python 3.10 wheelhouse
 Qwen2.5-VL-3B
-CARLA client package/PYTHONPATH for MacBook smoke run
+CARLA client package/PYTHONPATH for MacBook local run
 nuScenes mini
 Bench2Drive Mini
 ```

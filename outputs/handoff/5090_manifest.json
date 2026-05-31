@@ -1,0 +1,189 @@
+{
+  "created_on": "2026-05-31",
+  "first_5090_commands": {
+    "carla_collection_smoke": [
+      "python scripts/collect_carla_data.py --config src/vla_drive/configs/carla_rgb_waypoint.yaml --output-root /data/vla_drive/carla/e07_5090_smoke"
+    ],
+    "closed_loop": [
+      "CARLA_HOST=127.0.0.1 CARLA_PORT=2000 ROUTE_COUNT=5 ROUTE_SECONDS=20 REPORT_PATH=outputs/reports/e07_5090_closed_loop.json scripts/eval_carla.sh"
+    ],
+    "environment_check": [
+      "conda activate vla-drive-5090",
+      "python -c \"import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))\"",
+      "MPLCONFIGDIR=.matplotlib_cache python -m pytest -m 'not slow'"
+    ],
+    "lora_smoke": [
+      "STAGE=lora_vlm METADATA_PATH=/data/vla_drive/carla/e07_5090_smoke/metadata.jsonl EPOCHS=1 MAX_SAMPLES=64 BATCH_SIZE=1 IMAGE_SIZE=224 DEVICE=cuda CHECKPOINT_DIR=checkpoints/e07_5090_lora LOG_DIR=outputs/logs/e07_5090_lora scripts/train_lora.sh"
+    ],
+    "open_loop": [
+      "CHECKPOINT_PATH=checkpoints/e07_5090_reasoning_aux/latest.pt METADATA_PATH=/data/vla_drive/carla/e07_5090_smoke/metadata.jsonl REPORT_PATH=outputs/reports/e07_5090_open_loop.json BATCH_SIZE=8 IMAGE_SIZE=128 DEVICE=cuda scripts/eval_open_loop.sh"
+    ],
+    "training_smoke": [
+      "STAGE=reasoning_aux METADATA_PATH=/data/vla_drive/carla/e07_5090_smoke/metadata.jsonl EPOCHS=5 MAX_SAMPLES=200 BATCH_SIZE=4 IMAGE_SIZE=128 DEVICE=cuda CHECKPOINT_DIR=checkpoints/e07_5090_reasoning_aux LOG_DIR=outputs/logs/e07_5090_reasoning_aux scripts/train_lora.sh"
+    ]
+  },
+  "host": {
+    "machine": "arm64",
+    "python": "3.10.19",
+    "system": "Darwin"
+  },
+  "macbook_evidence": {
+    "mac_carla_vla_dataset": {
+      "disk_usage": "57M",
+      "duration_seconds": 60,
+      "image_size": "320x180",
+      "metadata_path": "/private/tmp/vla_drive_carla/mac_dataset_60s_320x180/metadata.jsonl",
+      "sample_count": 600
+    },
+    "mac_carla_vla_report": "outputs/reports/m10_mac_carla_60s_vla_training_summary.json",
+    "mac_carla_vla_training": {
+      "action_token": {
+        "final_loss": 3.272333860397339,
+        "initial_loss": 4.184484481811523,
+        "loss_decreased": true,
+        "steps": 190
+      },
+      "frozen_vlm": {
+        "final_loss": 11.732219696044922,
+        "initial_loss": 12.562702178955078,
+        "loss_decreased": true,
+        "steps": 2
+      },
+      "lora_vlm": {
+        "final_loss": 12.93395709991455,
+        "initial_loss": 12.93395709991455,
+        "loss_decreased": false,
+        "steps": 1
+      },
+      "reasoning_aux": {
+        "final_loss": 1.7949938774108887,
+        "initial_loss": 15.661927223205566,
+        "loss_decreased": true,
+        "steps": 190
+      }
+    },
+    "nuscenes_delta_tiny_minus_carla": {
+      "ade": -4.059888815879821,
+      "collision_proxy_rate": -0.15000000000000002,
+      "fde": -6.0967902302742,
+      "route_deviation": -0.03956653848290448
+    },
+    "nuscenes_report": "outputs/reports/m9_nuscenes_checkpoint_comparison.json",
+    "scale_envelope": {
+      "best_by_ade": "action_token_i64_n10",
+      "closed_loop_status": "ok",
+      "closed_loop_successful_count": 2,
+      "collection_status": "ok",
+      "collection_successful_count": 1,
+      "failed_count": 0,
+      "run_count": 16,
+      "successful_count": 16
+    },
+    "scale_envelope_report": "outputs/reports/mac_scale_envelope.json"
+  },
+  "purpose": "RTX 5090 handoff manifest after MacBook smoke, scale envelope, and nuScenes mini path validation.",
+  "repo": {
+    "branch": "main",
+    "commit": "a652e4c78c96db5e831ab48bf9c4d92074448f42",
+    "commit_short": "a652e4c",
+    "root": "/Users/donghyunkim/Desktop/10_\u110b\u1167\u11ab\u1100\u116e/2601_VLA",
+    "status_short": [
+      "M AGENTS.md",
+      " M README.md",
+      " M TASKS.md",
+      " M docs/carla_mac_setup.md",
+      " M docs/data.md",
+      " M docs/experiments.md",
+      " M docs/research.md",
+      " M docs/research/notes/P02_AutoVLA.md",
+      " M docs/research_journal.md",
+      " M docs/setup.md",
+      " M \"launchers/03_\\355\\225\\231\\354\\212\\265.command\"",
+      " M project_plan.md",
+      " M scripts/prepare_nuscenes.py",
+      " M scripts/train_lora.sh",
+      " M src/vla_drive/configs/nuscenes_open_loop.yaml",
+      " M src/vla_drive/data/collate.py",
+      " M src/vla_drive/evaluation/evaluator.py",
+      " M src/vla_drive/models/vla_policy.py",
+      " M src/vla_drive/training/losses.py",
+      " M src/vla_drive/training/train.py",
+      "?? outputs/handoff/",
+      "?? outputs/reports/m10_mac_carla_60s_action_token_open_loop.json",
+      "?? outputs/reports/m10_mac_carla_60s_frozen_vlm_open_loop.json",
+      "?? outputs/reports/m10_mac_carla_60s_lora_vlm_open_loop.json",
+      "?? outputs/reports/m10_mac_carla_60s_reasoning_aux_open_loop.json",
+      "?? outputs/reports/m10_mac_carla_60s_vla_training_summary.json",
+      "?? outputs/reports/m7_action_token_open_loop.json",
+      "?? outputs/reports/m7_fast_slow_reasoning_comparison.json",
+      "?? outputs/reports/m7_reasoning_aux_open_loop.json",
+      "?? outputs/reports/m7_reasoning_fast_open_loop.json",
+      "?? outputs/reports/m7_reasoning_slow_open_loop.json",
+      "?? outputs/reports/m7_regression_open_loop.json",
+      "?? outputs/reports/m7_regression_vs_action_token.json",
+      "?? outputs/reports/m9_nuscenes_carla_checkpoint_open_loop.json",
+      "?? outputs/reports/m9_nuscenes_checkpoint_comparison.json",
+      "?? outputs/reports/m9_nuscenes_tiny_checkpoint_open_loop.json",
+      "?? outputs/reports/mac_scale_envelope.json",
+      "?? scripts/export_handoff_bundle.sh",
+      "?? scripts/run_mac_scale_sweep.sh",
+      "?? src/vla_drive/configs/carla_mac_dataset.yaml",
+      "?? src/vla_drive/models/reasoning_head.py",
+      "?? tests/unit/test_reasoning_aux.py"
+    ]
+  },
+  "reports": [
+    "outputs/reports/mac_scale_envelope.json",
+    "outputs/reports/m9_nuscenes_carla_checkpoint_open_loop.json",
+    "outputs/reports/m9_nuscenes_tiny_checkpoint_open_loop.json",
+    "outputs/reports/m9_nuscenes_checkpoint_comparison.json",
+    "outputs/reports/m10_mac_carla_60s_reasoning_aux_open_loop.json",
+    "outputs/reports/m10_mac_carla_60s_action_token_open_loop.json",
+    "outputs/reports/m10_mac_carla_60s_frozen_vlm_open_loop.json",
+    "outputs/reports/m10_mac_carla_60s_lora_vlm_open_loop.json",
+    "outputs/reports/m10_mac_carla_60s_vla_training_summary.json"
+  ],
+  "required_paths": [
+    {
+      "exists": true,
+      "path": "requirements.offline.txt",
+      "type": "file"
+    },
+    {
+      "exists": false,
+      "path": "data/offline/wheels/linux-x86_64-cu12",
+      "type": "missing"
+    },
+    {
+      "exists": true,
+      "path": "data/offline/hf_models/Qwen2.5-VL-3B-Instruct",
+      "type": "dir"
+    },
+    {
+      "exists": true,
+      "path": "data/offline/datasets/nuscenes/v1.0-mini.tgz",
+      "type": "file"
+    },
+    {
+      "exists": true,
+      "path": "data/offline/datasets/bench2drive/Bench2Drive-mini",
+      "type": "dir"
+    },
+    {
+      "exists": true,
+      "path": "src/vla_drive/configs/carla_rgb_waypoint.yaml",
+      "type": "file"
+    },
+    {
+      "exists": true,
+      "path": "src/vla_drive/configs/nuscenes_open_loop.yaml",
+      "type": "file"
+    }
+  ],
+  "resource_gate": {
+    "do_not_use_h100_yet": "RTX 5090 must first reproduce MacBook-equivalent smoke, then attempt scaling with batch/image/model/LoRA/quantization reductions before any H100 handoff.",
+    "from_machine": "MacBook",
+    "reason_next_machine_required": "MacBook validated the pipeline but remains a smoke-scale environment. RTX 5090 is for larger CARLA route/weather collection, CUDA LoRA/QLoRA, higher image sizes, and repeated open/closed-loop evaluation.",
+    "to_machine": "RTX 5090"
+  }
+}

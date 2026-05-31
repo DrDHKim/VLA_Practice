@@ -1,0 +1,29 @@
+{
+  "best_by_ade": "action_token",
+  "best_by_fde": "regression",
+  "metadata_path": "/private/tmp/vla_drive_carla/m1_smoke/metadata.jsonl",
+  "metrics": {
+    "action_token": {
+      "ade": 0.5860463201999664,
+      "collision_proxy_rate": 0.0,
+      "fde": 0.5834009408950805,
+      "route_deviation": 0.04669791907072067,
+      "stage": "action_token"
+    },
+    "reasoning_aux": {
+      "ade": 7.2080940246582035,
+      "collision_proxy_rate": 1.0,
+      "fde": 11.141493988037109,
+      "route_deviation": 0.04551623724400997,
+      "stage": "reasoning_aux"
+    },
+    "regression": {
+      "ade": 0.6609331727027893,
+      "collision_proxy_rate": 0.25,
+      "fde": 0.5310325622558594,
+      "route_deviation": 0.04139167033135891,
+      "stage": "dummy_overfit"
+    }
+  },
+  "sample_count": 20
+}

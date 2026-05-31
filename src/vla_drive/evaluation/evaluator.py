@@ -15,7 +15,13 @@ from vla_drive.evaluation.open_loop_metrics import (
     final_displacement_error,
     route_deviation_error,
 )
-from vla_drive.models.vla_policy import build_dummy_policy
+from vla_drive.models.action_tokenizer import TrajectoryActionTokenizer
+from vla_drive.models.vla_policy import (
+    build_action_token_policy,
+    build_dummy_policy,
+    build_reasoning_aux_policy,
+    build_vlm_policy,
+)
 from vla_drive.utils.io import ensure_dir
 
 
@@ -41,9 +47,17 @@ class OpenLoopEvaluator:
     def evaluate(self) -> dict:
         checkpoint = torch.load(self.checkpoint_path, map_location=self.device, weights_only=False)
         checkpoint_args = checkpoint.get("args", {})
+        stage = checkpoint_args.get("stage", "dummy_overfit")
         waypoint_count = int(checkpoint_args.get("waypoint_count", 8))
         hidden_dim = int(checkpoint_args.get("hidden_dim", 64))
-        model = build_dummy_policy(hidden_dim=hidden_dim, waypoint_count=waypoint_count).to(self.device)
+        model, tokenizer = _build_model_for_checkpoint(
+            stage=stage,
+            checkpoint_args=checkpoint_args,
+            checkpoint_path=self.checkpoint_path,
+            hidden_dim=hidden_dim,
+            waypoint_count=waypoint_count,
+            device=self.device,
+        )
         model.load_state_dict(checkpoint["model_state_dict"])
         model.eval()
 
@@ -66,7 +80,7 @@ class OpenLoopEvaluator:
         with torch.no_grad():
             for batch in loader:
                 batch = _move_batch(batch, self.device)
-                pred = model(batch)["future_waypoints_ego"]
+                pred = _predict_waypoints(model, batch, stage=stage, tokenizer=tokenizer, device=self.device)
                 target = batch["future_waypoints_ego"]
                 batch_size = int(target.shape[0])
                 total_samples += batch_size
@@ -80,6 +94,8 @@ class OpenLoopEvaluator:
 
         report = {
             "checkpoint_path": str(self.checkpoint_path),
+            "stage": stage,
+            "reasoning_mode": checkpoint_args.get("reasoning_mode"),
             "metadata_path": str(self.metadata_path),
             "sample_count": total_samples,
             "ade": ade_sum / total_samples,
@@ -96,6 +112,63 @@ class OpenLoopEvaluator:
 
 class Evaluator(OpenLoopEvaluator):
     """Backward-compatible alias for the current open-loop evaluator."""
+
+
+def _build_model_for_checkpoint(
+    stage: str,
+    checkpoint_args: dict,
+    checkpoint_path: Path,
+    hidden_dim: int,
+    waypoint_count: int,
+    device: torch.device,
+):
+    if stage == "action_token":
+        tokenizer = TrajectoryActionTokenizer(num_tokens=int(checkpoint_args.get("num_action_tokens", 256)))
+        tokenizer_path = checkpoint_args.get("tokenizer_path")
+        if tokenizer_path is not None and Path(tokenizer_path).exists():
+            tokenizer.load(tokenizer_path)
+        else:
+            tokenizer.load(checkpoint_path.parent / "tokenizer.json")
+        model = build_action_token_policy(
+            num_tokens=tokenizer.num_tokens,
+            hidden_dim=hidden_dim,
+            waypoint_count=waypoint_count,
+        ).to(device)
+        return model, tokenizer
+    if stage == "reasoning_aux":
+        model = build_reasoning_aux_policy(
+            hidden_dim=hidden_dim,
+            waypoint_count=waypoint_count,
+            num_reasoning_labels=int(checkpoint_args.get("num_reasoning_labels", 4)),
+        ).to(device)
+        return model, None
+    if stage == "dummy_overfit":
+        model = build_dummy_policy(hidden_dim=hidden_dim, waypoint_count=waypoint_count).to(device)
+        return model, None
+    if stage in {"frozen_vlm", "lora_vlm"}:
+        model = build_vlm_policy(
+            model_path=checkpoint_args.get("model_path", "data/offline/hf_models/Qwen2.5-VL-3B-Instruct"),
+            freeze=stage == "frozen_vlm",
+            lora_rank=int(checkpoint_args.get("lora_rank", 8)),
+            lora_alpha=int(checkpoint_args.get("lora_alpha", 16)),
+            waypoint_count=waypoint_count,
+        ).to(device)
+        return model, None
+    raise ValueError(f"Unsupported checkpoint stage for open-loop evaluator: {stage}")
+
+
+def _predict_waypoints(
+    model,
+    batch: dict,
+    stage: str,
+    tokenizer: TrajectoryActionTokenizer | None,
+    device: torch.device,
+) -> torch.Tensor:
+    if stage == "action_token":
+        if tokenizer is None:
+            raise RuntimeError("action_token evaluation requires a tokenizer")
+        return model.decode_waypoints(batch, tokenizer).to(device)
+    return model(batch)["future_waypoints_ego"]
 
 
 def _select_device(requested: str) -> torch.device:

@@ -2,12 +2,12 @@ defaults:
   - base
 
 data:
-  dataset: carla
-  metadata_path: /private/tmp/vla_drive_carla/m1_smoke/metadata.jsonl
-  version: tiny-smoke
+  dataset: nuscenes
+  metadata_path: /private/tmp/vla_drive_nuscenes_mini/metadata.jsonl
+  version: mini-40-smoke
 
 evaluation:
   checkpoint_path: checkpoints/m4_dummy/latest.pt
-  report_path: outputs/reports/open_loop_m4_dummy.json
+  report_path: outputs/reports/m9_nuscenes_carla_checkpoint_open_loop.json
   batch_size: 4
   image_size: 64
