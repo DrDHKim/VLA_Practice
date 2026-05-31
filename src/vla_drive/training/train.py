@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader, Subset
 
 from vla_drive.data.collate import driving_collate_fn
 from vla_drive.data.datasets import JsonlDrivingDataset
-from vla_drive.models.vla_policy import build_dummy_policy
+from vla_drive.models.vla_policy import build_dummy_policy, build_vlm_policy
 from vla_drive.training.losses import waypoint_prediction_loss
 from vla_drive.utils.io import ensure_dir
 from vla_drive.utils.logging import get_logger
@@ -46,8 +46,30 @@ def train(args: argparse.Namespace) -> dict:
     if len(loader) == 0:
         raise RuntimeError(f"No training samples found: {args.metadata_path}")
 
-    model = build_dummy_policy(hidden_dim=args.hidden_dim, waypoint_count=args.waypoint_count).to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    if args.stage == "dummy_overfit":
+        model = build_dummy_policy(hidden_dim=args.hidden_dim, waypoint_count=args.waypoint_count).to(device)
+    elif args.stage == "frozen_vlm":
+        model = build_vlm_policy(
+            model_path=args.model_path,
+            freeze=True,
+            lora_rank=args.lora_rank,
+            lora_alpha=args.lora_alpha,
+            waypoint_count=args.waypoint_count,
+        ).to(device)
+    elif args.stage == "lora_vlm":
+        model = build_vlm_policy(
+            model_path=args.model_path,
+            freeze=False,
+            lora_rank=args.lora_rank,
+            lora_alpha=args.lora_alpha,
+            waypoint_count=args.waypoint_count,
+        ).to(device)
+    else:
+        raise ValueError(f"Unsupported training stage: {args.stage}")
+
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
+    LOGGER.info("trainable_params=%d total_params=%d", len(trainable_params), sum(1 for _ in model.parameters()))
+    optimizer = torch.optim.AdamW(trainable_params, lr=args.lr, weight_decay=args.weight_decay)
     start_epoch = 0
     global_step = 0
     resume_path = args.resume_from
@@ -167,7 +189,7 @@ def _json_safe_args(args: argparse.Namespace) -> dict:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train a tiny VLA waypoint policy.")
-    parser.add_argument("--stage", default="dummy_overfit", choices=["dummy_overfit"])
+    parser.add_argument("--stage", default="dummy_overfit", choices=["dummy_overfit", "frozen_vlm", "lora_vlm"])
     parser.add_argument("--metadata-path", type=Path, default=Path("/private/tmp/vla_drive_carla/m1_smoke/metadata.jsonl"))
     parser.add_argument("--checkpoint-dir", type=Path, default=Path("checkpoints/m4_dummy"))
     parser.add_argument("--log-dir", type=Path, default=Path("outputs/logs/m4_dummy"))
@@ -188,13 +210,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--l1-weight", type=float, default=1.0)
     parser.add_argument("--fde-weight", type=float, default=1.0)
     parser.add_argument("--log-every", type=int, default=5)
+    parser.add_argument("--model-path", type=str, default="data/offline/hf_models/Qwen2.5-VL-3B-Instruct")
+    parser.add_argument("--lora-rank", type=int, default=8)
+    parser.add_argument("--lora-alpha", type=int, default=16)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    if args.stage != "dummy_overfit":
-        raise ValueError(f"Unsupported training stage: {args.stage}")
     train(args)
 
 

@@ -17,6 +17,9 @@ ARGS=(
   --image-size "${IMAGE_SIZE:-64}"
   --max-samples "${MAX_SAMPLES:-10}"
   --device "${DEVICE:-auto}"
+  --model-path "${MODEL_PATH:-data/offline/hf_models/Qwen2.5-VL-3B-Instruct}"
+  --lora-rank "${LORA_RANK:-8}"
+  --lora-alpha "${LORA_ALPHA:-16}"
 )
 
 if [[ -n "${RESUME_FROM:-}" ]]; then

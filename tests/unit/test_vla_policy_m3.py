@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import pytest
 import torch
 
 from vla_drive.models.vla_policy import build_dummy_policy
 from vla_drive.training.losses import waypoint_prediction_loss
+
+VLM_MODEL_PATH = "data/offline/hf_models/Qwen2.5-VL-3B-Instruct"
 
 
 def test_dummy_vla_policy_forward_loss_backward() -> None:
@@ -22,3 +25,60 @@ def test_dummy_vla_policy_forward_loss_backward() -> None:
     loss.backward()
     assert loss.item() >= 0.0
     assert any(param.grad is not None for param in policy.parameters())
+
+
+@pytest.mark.slow
+def test_vlm_backbone_frozen_encode_shape(tmp_path) -> None:
+    """Smoke test: VLMBackbone loads Qwen2.5-VL-3B and encodes one image."""
+    from PIL import Image as PILImage
+
+    from vla_drive.models.backbone_vlm import VLMBackbone
+
+    img_path = tmp_path / "test_frame.png"
+    PILImage.new("RGB", (320, 180), color=(128, 64, 32)).save(img_path)
+
+    backbone = VLMBackbone(model_name_or_path=VLM_MODEL_PATH, freeze=True)
+    backbone.load()
+
+    batch = {
+        "image_paths": [str(img_path)],
+        "prompts": ["Drive with command=lane_follow at speed=5.00 m/s and predict future ego-frame waypoints."],
+    }
+    hidden = backbone.encode(batch)
+
+    assert hidden.shape == (1, 2048), f"unexpected shape {hidden.shape}"
+    assert hidden.dtype == torch.float32
+
+
+@pytest.mark.slow
+def test_vlm_policy_frozen_forward_and_backward(tmp_path) -> None:
+    """Smoke test: frozen_vlm stage — only WaypointHead params get gradients."""
+    from PIL import Image as PILImage
+
+    from vla_drive.models.vla_policy import build_vlm_policy
+
+    img_path = tmp_path / "test_frame.png"
+    PILImage.new("RGB", (320, 180), color=(100, 150, 200)).save(img_path)
+
+    policy = build_vlm_policy(model_path=VLM_MODEL_PATH, freeze=True, waypoint_count=8)
+
+    batch = {
+        "image_paths": [str(img_path)],
+        "prompts": ["Drive with command=lane_follow at speed=5.00 m/s and predict future ego-frame waypoints."],
+        "images": torch.zeros(1, 3, 64, 64),
+        "ego_speed_mps": torch.tensor([5.0]),
+    }
+    target = torch.zeros(1, 8, 2)
+
+    output = policy(batch)
+    pred = output["future_waypoints_ego"]
+    assert pred.shape == (1, 8, 2)
+
+    loss = waypoint_prediction_loss(pred, target)
+    loss.backward()
+
+    head_params_with_grad = [p for p in policy.waypoint_head.parameters() if p.grad is not None]
+    backbone_params_with_grad = [p for p in policy.backbone.model.parameters() if p.grad is not None]
+
+    assert len(head_params_with_grad) > 0, "WaypointHead should have gradients"
+    assert len(backbone_params_with_grad) == 0, "Frozen VLM backbone should have no gradients"

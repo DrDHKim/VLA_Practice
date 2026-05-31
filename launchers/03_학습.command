@@ -6,6 +6,7 @@ set -euo pipefail
 # 필요한 값은 이 블록만 수정해서 사용한다.
 # ============================================================
 
+# STAGE 선택: dummy_overfit | frozen_vlm | lora_vlm
 STAGE=dummy_overfit
 METADATA_PATH=/private/tmp/vla_drive_carla/m1_smoke/metadata.jsonl
 CHECKPOINT_DIR=checkpoints/m4_dummy
@@ -16,6 +17,11 @@ EPOCHS=20
 BATCH_SIZE=2
 IMAGE_SIZE=64
 MAX_SAMPLES=10
+
+# VLM 스테이지 파라미터 (frozen_vlm / lora_vlm 사용 시)
+MODEL_PATH=data/offline/hf_models/Qwen2.5-VL-3B-Instruct
+LORA_RANK=8
+LORA_ALPHA=16
 
 # 이어 학습할 때만 경로를 넣는다.
 # 예: RESUME_FROM=checkpoints/m4_dummy/latest.pt
@@ -54,5 +60,8 @@ EPOCHS="$EPOCHS" \
 BATCH_SIZE="$BATCH_SIZE" \
 IMAGE_SIZE="$IMAGE_SIZE" \
 MAX_SAMPLES="$MAX_SAMPLES" \
+MODEL_PATH="$MODEL_PATH" \
+LORA_RANK="$LORA_RANK" \
+LORA_ALPHA="$LORA_ALPHA" \
 RESUME_FROM="$RESUME_FROM" \
   scripts/train_lora.sh

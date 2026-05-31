@@ -28,8 +28,11 @@ def driving_collate_fn(samples, image_size: int | None = None):
     ]
     sample_ids = [sample.observation.sample_id for sample in samples]
 
+    image_paths = [str(sample.observation.camera_front) for sample in samples]
+
     return {
         "sample_ids": sample_ids,
+        "image_paths": image_paths,
         "images": images,
         "ego_speed_mps": speeds,
         "route_commands": route_commands,
