@@ -653,6 +653,96 @@ MPLCONFIGDIR=.matplotlib_cache .conda/bin/python -m pytest -m 'not slow'
 15 passed, 2 deselected
 ```
 
+## 2026-06-01: PID 제어기 완전 제거 및 autopilot-only 수집 정리
+
+사용자 지적에 따라 PID 기반 제어 경로를 완전히 제거했다. 수집과 closed-loop 평가는 CARLA Traffic Manager autopilot만 사용한다.
+
+삭제:
+
+- `src/vla_drive/simulation/pid_controller.py`
+- `src/vla_drive/simulation/carla_agent.py`
+- `launchers/04_PID튜닝.command`
+- PID controller unit tests
+
+변경:
+
+- `scripts/collect_carla_data.py`
+  - `local_planner`/`basic_agent` fallback 제거.
+  - `--driving-stack`은 `autopilot` 또는 `traffic_manager`만 허용.
+  - 기본 수집은 `vehicle.set_autopilot(True, traffic_manager_port)`.
+  - `use_fixed_path=false`를 기본으로 두고, 실제 autopilot trajectory를 후처리해 future waypoint target을 만든다.
+  - camera transform을 `x=2.2, z=2.0, pitch=-8`로 조정했다.
+- `scripts/eval_carla_closed_loop.py`
+  - PID closed-loop rollout 제거.
+  - Traffic Manager autopilot rollout으로 collision과 distance-based route completion을 기록한다.
+- `src/vla_drive/configs/carla_mac_dataset.yaml`, `src/vla_drive/configs/carla_rgb_waypoint.yaml`
+  - `driving_stack: traffic_manager`
+  - `speed_control: desired`
+  - `target_speed_mps: 6.0`
+  - `use_fixed_path: false`
+  - `min_sample_speed_mps: 0.5`
+  - `max_sample_brake: 0.2`
+- `scripts/collect_carla_scenes.sh`
+  - Wine/CrossOver가 non-zero exit을 반환하더라도 metadata가 생성된 경우 scene을 accept하도록 보강했다.
+
+기존 문제 원인 판단:
+
+- throttle/brake 반복은 Traffic Manager에 fixed path와 낮은 target speed 제한을 동시에 걸면서 생긴 oscillation 가능성이 높다.
+- 기존 수집 결과는 `throttle`/`brake` 변화가 각각 120회 이상이었고 `brake=0.7` frame이 반복됐다.
+- 새 기본값은 fixed path를 끄고 desired speed autopilot으로 주행하며, brake가 큰 frame은 기본적으로 metadata에서 제외한다.
+
+검증 수집:
+
+```text
+output=/Volumes/DATASET/vla_drive_carla/autopilot_smoke_8s
+seconds=8
+fps=10
+image=320x180
+driving_stack=autopilot
+```
+
+결과:
+
+```text
+records=10
+speed min/mean/max=0.8737 / 3.2621 / 6.4992 m/s
+throttle min/mean/max=0.1578 / 0.7808 / 0.85
+throttle changes=1
+brake min/mean/max=0.0 / 0.0 / 0.0
+brake changes=0
+steer changes=0
+```
+
+생성 파일:
+
+```text
+/Volumes/DATASET/vla_drive_carla/autopilot_smoke_8s/metadata.jsonl
+/Volumes/DATASET/vla_drive_carla/autopilot_smoke_8s/preview.gif
+/Volumes/DATASET/vla_drive_carla/autopilot_smoke_8s/bev_route.png
+/Volumes/DATASET/vla_drive_carla/autopilot_smoke_8s/controls_timeseries.png
+```
+
+카메라 확인:
+
+- `/Volumes/DATASET/vla_drive_carla/autopilot_smoke_8s/images/frame_00016_front.png`는 도로 전방 시야가 정상으로 저장됐다.
+
+검증:
+
+```text
+.conda/bin/python -m py_compile scripts/collect_carla_data.py scripts/eval_carla_closed_loop.py
+bash -n scripts/collect_carla_scenes.sh launchers/05_평가.command launchers/06_데이터수집.command scripts/eval_carla.sh
+git diff --check
+MPLCONFIGDIR=.matplotlib_cache .conda/bin/python -m pytest -m 'not slow'
+```
+
+결과:
+
+```text
+13 passed, 2 deselected
+```
+
+`rg` 기준 PID 관련 code/test/launcher 참조는 제거됐고, 남은 `PORT_PIDS`는 port process id 변수명이다.
+
 ## 2026-05-31: M10 5090 Handoff Package 완료
 
 MacBook에서 검증한 code path를 RTX 5090으로 넘기기 위한 manifest 생성 스크립트와 첫 실행 command set을 추가했다.
@@ -926,6 +1016,59 @@ RuntimeError: time-out of 30000ms while waiting for the simulator
 
 M10B 상태는 `[x]`로 추가했다.
 
+## 2026-06-01: CARLA 수집 주행 기본값을 Traffic Manager Autopilot으로 수정
+
+사용자 지적에 따라 데이터 수집 주행 기본값을 `local_planner` fallback에서 CARLA Traffic Manager autopilot으로 바로잡았다. 이전 설명에서 PID 주행처럼 설명한 것은 부정확했다. 현재 수집 파이프라인은 `CONTROL_MODE=autopilot`을 기본값으로 사용하며, 내부적으로 `driving_stack=traffic_manager`로 매핑된다.
+
+변경 내용:
+
+- `src/vla_drive/configs/carla_mac_dataset.yaml`: `driving_stack: traffic_manager`로 변경.
+- `src/vla_drive/configs/carla_rgb_waypoint.yaml`: `driving_stack: traffic_manager`로 변경.
+- `launchers/06_데이터수집.command`: `CONTROL_MODE=autopilot` 변수 추가.
+- `scripts/collect_carla_scenes.sh`: `CONTROL_MODE`를 `collect_carla_data.py --driving-stack`으로 전달.
+- `scripts/collect_carla_data.py`: `--driving-stack autopilot` alias를 `traffic_manager`로 normalize.
+- `launchers/README.md`: 06 수집 command가 Traffic Manager autopilot 기반임을 명시.
+
+현재 주행 모드:
+
+```text
+CONTROL_MODE=autopilot
+  -> --driving-stack autopilot
+  -> collect_carla_data.py
+  -> driving_stack=traffic_manager
+  -> vehicle.set_autopilot(True, traffic_manager_port)
+```
+
+Traffic Manager 설정:
+
+```text
+speed_control=percentage
+target_speed_mps=5.0
+assumed_speed_limit_kmh=30.0
+auto_lane_change=false
+ignore_lights_percentage=100.0
+ignore_signs_percentage=100.0
+ignore_vehicles_percentage=100.0
+distance_to_leading_vehicle_m=3.0
+```
+
+`local_planner`와 `basic_agent`는 fallback으로만 남겨두었다. 기본 수집 command에서는 사용하지 않는다.
+
+검증:
+
+```text
+bash -n scripts/collect_carla_scenes.sh
+bash -n launchers/06_데이터수집.command
+.conda/bin/python -m py_compile scripts/collect_carla_data.py
+MPLCONFIGDIR=.matplotlib_cache .conda/bin/python -m pytest -m 'not slow'
+```
+
+결과:
+
+```text
+15 passed, 2 deselected
+```
+
 ## 2026-05-31: 데이터 저장 경로 외장 볼륨으로 통일
 
 내장 Mac 디스크 용량 절약을 위해 CARLA 데이터 수집 경로를 모두 `/Volumes/DATASET/vla_drive_carla`로 변경했다. 239GB 외장 볼륨이 `/Volumes/DATASET`에 마운트되어 있다.
@@ -1002,3 +1145,225 @@ pytest: 17 passed
 ```
 
 Mac smoke 단계에서는 3 camera 모두 front fallback을 사용하고, temporal history도 동일 frame을 반복하므로 추가 compute 없이 구조 정합성만 확인한다. 실제 3-camera 동기 수집은 CARLA collection에서 검증 예정.
+
+## 2026-06-02: Mac CARLA Traffic Manager autopilot 속도 진동 분석
+
+사용자가 `06_데이터수집.command`로 만든 `/Volumes/DATASET/vla_drive_carla/mac_scenes/scene_000/scene.gif`에서 속도가 5~6m/s와 1m/s 이하를 반복하는 현상을 확인했다.
+
+확인 결과:
+
+- `06_데이터수집.command`는 `CONTROL_MODE=autopilot`이고, `scripts/collect_carla_data.py`는 `vehicle.set_autopilot(True, traffic_manager_port)`만 사용한다.
+- PID 기반 controller/agent는 삭제된 상태이며 데이터 수집 경로에서는 `apply_control()`을 호출하지 않는다.
+- 기존 `scene_000/metadata.jsonl`은 `frame gaps unique [1, 2, 4, 5, 6]`로 연속 프레임이 아니었다.
+- 원인은 `max_sample_brake=0.2`, `min_sample_speed_mps=0.5` 필터가 브레이크/저속 프레임을 제거해서 GIF와 control plot에서 실제 브레이크 구간이 숨겨진 것이다.
+
+수정:
+
+- `src/vla_drive/configs/carla_mac_dataset.yaml`, `src/vla_drive/configs/carla_rgb_waypoint.yaml`
+  - `min_sample_speed_mps: 0.0`
+  - `max_sample_brake: 1.0`
+  - `speed_control: percentage`
+- 수집 단계에서는 frame quality filtering을 하지 않고, 후처리/학습 dataset filtering에서 별도로 다루는 방향으로 변경했다.
+
+추가 검증:
+
+- `autopilot_async_nofilter_smoke_20s`: 135 records, `frame gaps [1]`, skipped 0. 하지만 Traffic Manager 자체가 `throttle=0.85`와 `brake=0.7`을 반복했다.
+- `autopilot_percentage_smoke_20s`: 135 records, `frame gaps [1]`, skipped 0. `speed_control: percentage`도 진동을 제거하지 못했다.
+- `autopilot_percentage_3mps_smoke_20s`: 135 records, `frame gaps [1]`, skipped 0. 목표속도 3m/s도 진동을 제거하지 못했다.
+- `autopilot_no_speed_control_smoke_20s`: 135 records, `frame gaps [1]`, skipped 0. `speed_control=none`은 평균속도 0.53m/s로 더 나빠졌다.
+- `synchronous_mode: true` smoke는 이미지 2프레임만 생성한 뒤 CrossOver exit code 3으로 종료되어 현재 Mac/CrossOver 조합에서는 기본 수집 옵션으로 쓰지 않는다.
+- CARLA 0.9.15 예제 코드도 Traffic Manager/traffic simulation을 async에서 실행하면 문제가 생길 수 있고 sync mode로 바꾸라고 경고한다.
+  - `PythonAPI/examples/manual_control.py`
+  - `PythonAPI/examples/generate_traffic.py`
+
+결론:
+
+- 현재 Mac 수집은 Traffic Manager autopilot으로 돈다.
+- 이전 GIF의 “브레이크 없이 속도만 튐”은 frame filtering 때문에 생긴 표시/로그 문제였다.
+- frame filtering 제거 후에는 실제 TM autopilot이 비동기 CrossOver 환경에서 throttle/brake를 과격하게 반복하는 것이 보인다.
+- `06_데이터수집.command`와 `scripts/collect_carla_scenes.sh`에 `SPEED_CONTROL` 변수를 추가했지만, Mac/CrossOver stop-go의 해결책은 아니었다.
+- Mac에서는 RGB camera/schema/metadata smoke와 작은 학습 연결 검증을 우선하고, 안정적인 closed-loop 속도 품질은 같은 code path를 remote Linux/Windows CARLA host에서 재검증해야 한다.
+
+## 2026-06-02: Mac CARLA synchronous mode 수집 복구
+
+사용자 요청에 따라 sync mode를 우선 목표로 다시 조사했다. 모든 smoke output은 dataset volume을 쓰지 않고 프로젝트 루트 `tmp/carla_sync_smokes/`에 저장했다. `tmp/`는 `.gitignore`에 추가했다.
+
+원인:
+
+- 기존 sync 실패는 CARLA sync 자체가 불가능한 문제가 아니라 collector가 sync tick과 camera `sensor_tick`을 잘못 맞춘 문제였다.
+- camera는 `sensor_tick=1/fps=0.1s`인데 world fixed delta는 `0.05s`였다.
+- 기존 loop는 world tick 1회마다 camera frame 1장을 기다렸고, 실제 camera frame은 2 tick마다 나오므로 두 번째 tick에서 `_queue.Empty`가 발생했다.
+
+수정:
+
+- `scripts/collect_carla_data.py`
+  - `--synchronous-mode true|false`, `--fixed-delta-seconds` CLI 옵션 추가.
+  - sync mode에서 `ticks_per_sample = round((1/fps) / fixed_delta_seconds)`를 계산한다.
+  - 샘플 하나당 world tick을 `ticks_per_sample`회 진행한 뒤 camera frame을 읽는다.
+  - sync 진단용 world setting/tick progress 로그를 flush 출력한다.
+- `launchers/01_카를라실행.command`
+  - 기본 `CARLA_QUALITY=Low`.
+  - `CARLA_FPS=30` 변수 추가, 실행 인자 `-fps=$CARLA_FPS`.
+- `src/vla_drive/configs/carla_mac_dataset.yaml`, `src/vla_drive/configs/carla_rgb_waypoint.yaml`
+  - `synchronous_mode: true`.
+- `launchers/06_데이터수집.command`, `scripts/collect_carla_scenes.sh`
+  - `SYNCHRONOUS_MODE`, `FIXED_DELTA_SECONDS` 변수 추가.
+  - `collect_carla_scenes.sh`의 CARLA 내부 대기 시간을 `CARLA_INTERNAL_WAIT_SECONDS` 변수로 분리하고 기본 300초로 설정.
+
+검증:
+
+1. 직접 collector smoke
+
+```text
+output=tmp/carla_sync_smokes/sync_low_fps30_fd005_sampling_8s
+seconds=8
+fps=10
+fixed_delta_seconds=0.05
+ticks_per_sample=2
+frames_raw=80
+frames_valid=15
+frame gaps=[1]
+speed min/mean/max=4.896 / 4.896 / 4.897 m/s
+brake>0.01=0
+```
+
+2. `scripts/collect_carla_scenes.sh` 경로 smoke
+
+```text
+output=tmp/carla_sync_smokes/collect_scenes_sync_8s
+seconds=8
+fps=10
+fixed_delta_seconds=0.05
+frames=15
+frame gaps=[1]
+speed min/mean/max=3.321 / 4.360 / 5.213 m/s
+speed<2=0
+brake>0.01=3
+```
+
+생성 파일:
+
+```text
+tmp/carla_sync_smokes/collect_scenes_sync_8s/scene_000/scene.gif
+tmp/carla_sync_smokes/collect_scenes_sync_8s/scene_000/controls_timeseries.png
+tmp/carla_sync_smokes/collect_scenes_sync_8s/metadata.jsonl
+tmp/carla_sync_smokes/collect_scenes_sync_8s/collection_summary.json
+```
+
+주의:
+
+- CrossOver/Wine는 collector가 `CARLA_COLLECTION_OK`를 찍고 metadata를 쓴 뒤에도 process exit code 3을 반환하는 경우가 있다.
+- `scripts/collect_carla_scenes.sh`는 metadata가 존재하면 scene을 accept하므로 최종 command는 `CARLA_SCENE_COLLECTION_OK`로 종료된다.
+- sync smoke 기준 stop-go는 비동기 smoke 대비 사라졌다.
+
+## 2026-06-02: sync smoke time-series 재검증
+
+사용자가 sync smoke time-series에서 속도와 pedal 진동이 심해 보인다고 지적했다. 표기 문제와 실제 주행 문제를 분리해 확인했다.
+
+확인 결과:
+
+- 표기 문제 있음: sync smoke의 sample interval은 `ticks_per_sample=2`, `fixed_delta_seconds=0.05`이므로 실제 metadata timestamp 간격은 `0.1s`여야 했다.
+- 기존 metadata writer는 timestamp를 `frame_index * fixed_delta_seconds`로 저장해 `0.05s` 간격처럼 표시했다. 이 때문에 control graph x축이 2배 압축되어 진동이 더 급격해 보였다.
+- `scripts/collect_carla_data.py`를 수정해 sync/async 모두 실제 sample interval 기준 timestamp를 저장하게 했다.
+
+실제 여부:
+
+- pedal 값은 `vehicle.get_control()`에서 읽은 실제 CARLA control 값이므로 표기만의 문제는 아니다.
+- timestamp를 `0.1s`로 보정한 뒤 위치 변화 기반 속도와 `vehicle.get_velocity()` 기반 logged speed를 비교했다.
+- 위치 기반 속도는 `4.213, 4.695, 5.128, 4.759, 3.598, ... m/s`였고 logged speed는 `4.419, 4.917, 5.213, 3.862, 3.668, ... m/s`였다.
+- 평균 차이는 약 `0.278m/s`, 최대 차이는 약 `0.968m/s`로, 속도 변화는 실제 이동에서도 관찰된다.
+
+결론:
+
+- 기존 graph는 x축 timestamp 버그 때문에 실제보다 과장되어 보였다.
+- 그러나 throttle/brake 변화와 속도 출렁임 자체는 실제 Traffic Manager control/vehicle motion이다.
+- sync mode로 비동기 stop-go 문제는 크게 줄었지만, Traffic Manager가 target speed 근처에서 throttle/brake를 bang-bang 형태로 일부 조절하는 현상은 남아 있다.
+
+## 2026-06-02: N-scene CARLA collection 준비
+
+N개 scene 수집 전에 stale output과 duplicate sample id 문제를 보강했다.
+
+변경:
+
+- `scripts/collect_carla_scenes.sh`
+  - `OVERWRITE_SCENE_DIRS` 옵션 추가. 기본값은 `1`.
+  - scene 수집 시작 전에 기존 `scene_XXX` 디렉터리를 삭제한다.
+  - retry 전에 partial scene dir을 삭제해 이전 metadata를 새 성공으로 오인하지 않게 했다.
+- `launchers/06_데이터수집.command`
+  - `OVERWRITE_SCENE_DIRS=1` 노출.
+- `scripts/collect_carla_data.py`
+  - `sample_id`를 `scene_000_000015`처럼 scene directory name을 포함하도록 변경했다.
+  - combined metadata에서 scene마다 `carla_000015`가 반복되는 문제를 방지한다.
+
+검증:
+
+```text
+.conda/bin/python -m py_compile scripts/collect_carla_data.py
+bash -n launchers/06_데이터수집.command scripts/collect_carla_scenes.sh
+git diff --check
+MPLCONFIGDIR=.matplotlib_cache .conda/bin/python -m pytest
+```
+
+결과:
+
+```text
+15 passed
+```
+
+## OpenDriveVLA Model Specifications
+
+**Reference**: P01 - OpenDriveVLA: Towards End-to-end Autonomous Driving with Large Vision Language Action Model
+
+**Input Specifications**:
+- 3-frontal camera images (multi-view)
+- Ego states: Velocity, acceleration, yaw rate
+- High-level command: Natural language driving instructions
+
+**Output Specifications**:
+- Waypoint sequence: 2D coordinates (x, y) in ego frame for T timesteps
+- Tokenized discrete waypoint representation for LLM processing
+
+**Training Data Requirements**:
+- Multi-view images from 3 front cameras
+- Ego vehicle state information (velocity, acceleration, yaw rate)
+- High-level driving commands
+- Waypoint labels for trajectory prediction
+
+**Key Implementation Notes**:
+- Model uses transformer-based architecture with multi-head attention
+- Follows multi-stage training approach (frozen projector → instruction tuning → trajectory tuning)
+- Waypoints converted to discrete text tokens for LLM integration
+
+## 2026-06-02: launcher 미연결 파일 정리
+
+`launchers/*.command`에서 시작하는 실행 경로를 기준으로 미사용 후보를 조사하고 정리했다.
+
+삭제:
+
+- `scripts/run_data_collection.py`
+- `src/vla_drive/simulation/data_collector.py`
+- `src/vla_drive/simulation/high_level_command_generator.py`
+- `tests/test_high_level_commands.py`
+- `src/vla_drive/models/test_vla_model.py`
+- `src/vla_drive/models/transformer.py`
+- `src/vla_drive/models/vla.py`
+- `scripts/render_carla_smoke_video.py`
+- `scripts/render_carla_trajectory_video.py`
+
+판단 기준:
+
+- `06_데이터수집.command`는 `scripts/collect_carla_scenes.sh`를 통해 `scripts/collect_carla_data.py`, `scripts/render_scene_gif.py`, `scripts/render_scene_report.py`를 사용한다.
+- 삭제한 `data_collector.py` 계열은 현재 launcher 수집 경로와 연결되지 않은 별도 prototype이었다.
+- 삭제한 `models/vla.py` 계열은 `03_학습.command`가 사용하는 `src/vla_drive/models/vla_policy.py` 경로와 연결되지 않은 별도 prototype이었다.
+- 삭제한 old render utility는 현재 scene GIF/report renderer로 대체됐다.
+
+검증:
+
+```text
+rg -n "run_data_collection|data_collector|high_level_command_generator|test_high_level_commands|models\.vla|VLAModel|TransformerEncoder|test_vla_model|render_carla_smoke_video|render_carla_trajectory_video" .
+```
+
+결과:
+
+- 현재 코드 참조는 남지 않았다.
+- `scripts/render_carla_smoke_video.py`, `scripts/render_carla_trajectory_video.py` 이름은 과거 연구일지 기록에만 남아 있다.

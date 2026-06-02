@@ -64,9 +64,8 @@
 ### M1: CARLA 연결
 
 - `carla_client.py`: 서버 연결, world/weather/spawn 설정
-- `carla_agent.py`: sensor callback, observation 생성, action 적용
-- `pid_controller.py`: waypoints를 control로 변환
-- 완료 기준: rule-based waypoint로 1개 route 완주
+- `collect_carla_data.py`: Traffic Manager autopilot trajectory/control log 수집
+- 완료 기준: Traffic Manager autopilot으로 1개 scene 수집
 
 ### M2: 데이터셋 포맷
 

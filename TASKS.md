@@ -44,16 +44,14 @@
 파일:
 
 - `src/vla_drive/simulation/carla_client.py`
-- `src/vla_drive/simulation/carla_agent.py`
 - `src/vla_drive/simulation/route_planner.py`
-- `src/vla_drive/simulation/pid_controller.py`
 - `src/vla_drive/utils/io.py`
 - `scripts/collect_carla_data.py`
 - `src/vla_drive/configs/carla_rgb_waypoint.yaml`
 
 목표:
 
-- MacBook에서 tiny smoke부터 시작해 가능한 범위까지 CARLA 서버에 연결하고, 차량과 센서를 spawn하고, rule-based route를 따라 주행하며 데이터를 저장할 준비를 한다. CARLA server는 `scripts/run_carla_mac_crossover.sh`로 켠 local CrossOver/D3DMetal server를 우선 사용하되, Mac 리소스 한계가 기록된 경우 같은 config로 remote Linux/Windows host도 허용한다.
+- MacBook에서 tiny smoke부터 시작해 가능한 범위까지 CARLA 서버에 연결하고, 차량과 센서를 spawn하고, Traffic Manager autopilot으로 주행하며 데이터를 저장할 준비를 한다. CARLA server는 `scripts/run_carla_mac_crossover.sh`로 켠 local CrossOver/D3DMetal server를 우선 사용하되, Mac 리소스 한계가 기록된 경우 같은 config로 remote Linux/Windows host도 허용한다.
 - 같은 코드는 이후 리소스 한계가 확인된 시점에 RTX 5090과 AIP/H100에서 규모만 키워 재사용한다.
 
 단계:
@@ -63,8 +61,8 @@
 3. `RoutePlanner`에서 짧은 route와 local waypoint/high-level command를 만든다.
 4. actor cleanup 로직을 구현한다.
 5. RGB front camera sensor callback을 구현한다.
-6. `PIDWaypointController.control()`을 구현한다.
-7. `scripts/collect_carla_data.py`에서 짧은 route 1개를 실행하고 JSONL/images를 저장한다.
+6. Traffic Manager autopilot control log를 JSONL target에 저장한다.
+7. `scripts/collect_carla_data.py`에서 짧은 scene 1개를 실행하고 JSONL/images를 저장한다.
 
 완료 기준:
 
@@ -206,7 +204,6 @@
 - `src/vla_drive/evaluation/closed_loop_metrics.py`
 - `src/vla_drive/evaluation/evaluator.py`
 - `scripts/eval_carla.sh`
-- `src/vla_drive/simulation/carla_agent.py`
 
 목표:
 
@@ -412,6 +409,42 @@
 - command/script 문법 검사가 통과한다.
 - early stopping smoke 학습이 동작한다.
 - CARLA가 응답하지 않는 경우 수집 script가 재시도하거나 명확히 실패한다.
+
+## M10C: Autopilot-Only Data Collection Cleanup
+
+상태: `[x]`
+
+파일:
+
+- `scripts/collect_carla_data.py`
+- `scripts/collect_carla_scenes.sh`
+- `scripts/eval_carla_closed_loop.py`
+- `scripts/eval_carla.sh`
+- `launchers/05_평가.command`
+- `launchers/06_데이터수집.command`
+- `src/vla_drive/configs/carla_mac_dataset.yaml`
+- `src/vla_drive/configs/carla_rgb_waypoint.yaml`
+- `tests/unit/test_simulation_m1.py`
+
+목표:
+
+- PID 기반 제어기를 완전히 제거하고, CARLA Traffic Manager autopilot 기반 수집/평가만 남긴다.
+- 카메라 시야와 throttle/brake oscillation 문제를 완화한다.
+
+단계:
+
+1. `[x]` PID controller 파일, PID agent 파일, PID tuning launcher를 삭제한다.
+2. `[x]` closed-loop 평가를 Traffic Manager autopilot 기반으로 바꾼다.
+3. `[x]` 수집 기본값을 autopilot-only로 고정하고 직접 제어 fallback을 제거한다.
+4. `[x]` 고정 path autopilot을 기본에서 끄고 실제 autopilot trajectory를 post-process한다.
+5. `[x]` 카메라 위치를 더 높고 앞으로 이동한다.
+6. `[x]` brake가 큰 frame을 기본적으로 제외한다.
+
+완료 기준:
+
+- PID 관련 code/test/launcher 참조가 제거된다.
+- autopilot-only 8초 smoke 수집에서 RGB image와 metadata가 생성된다.
+- brake 반복이 사라진 smoke report가 생성된다.
 
 ## M11: RTX 5090 Expansion
 

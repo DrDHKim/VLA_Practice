@@ -11,7 +11,7 @@ simulation:
   town: Town01
   weather: ClearNoon
   timeout_seconds: 30.0
-  synchronous_mode: false
+  synchronous_mode: true
   fixed_delta_seconds: 0.05
 
 collection:
@@ -22,7 +22,19 @@ collection:
   image_height: 360
   fov: 90.0
   vehicle_filter: vehicle.tesla.model3
-  target_speed_mps: 5.0
+  driving_stack: traffic_manager
+  speed_control: percentage
+  assumed_speed_limit_kmh: 30.0
+  auto_lane_change: false
+  ignore_lights_percentage: 100.0
+  ignore_signs_percentage: 100.0
+  ignore_vehicles_percentage: 100.0
+  distance_to_leading_vehicle_m: 3.0
+  target_speed_mps: 6.0
+  use_fixed_path: false
+  min_motion_speed_mps: 0.2
+  min_sample_speed_mps: 0.0
+  max_sample_brake: 1.0
   route_length: 80
   waypoint_spacing_m: 2.0
   future_waypoint_count: 8

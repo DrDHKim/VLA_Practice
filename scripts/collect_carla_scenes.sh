@@ -11,15 +11,25 @@ FPS="${FPS:-10}"
 IMAGE_WIDTH="${IMAGE_WIDTH:-320}"
 IMAGE_HEIGHT="${IMAGE_HEIGHT:-180}"
 TARGET_SPEED_MPS="${TARGET_SPEED_MPS:-5.0}"
+SPEED_CONTROL="${SPEED_CONTROL:-percentage}"
+SYNCHRONOUS_MODE="${SYNCHRONOUS_MODE:-true}"
+FIXED_DELTA_SECONDS="${FIXED_DELTA_SECONDS:-0.05}"
 ROUTE_LENGTH="${ROUTE_LENGTH:-120}"
+CONTROL_MODE="${CONTROL_MODE:-autopilot}"
 TOWN="${TOWN:-Town01}"
 WEATHER="${WEATHER:-ClearNoon}"
 SPAWN_SEED_BASE="${SPAWN_SEED_BASE:-2601}"
 CARLA_HOST="${CARLA_HOST:-127.0.0.1}"
 CARLA_PORT="${CARLA_PORT:-2000}"
 WAIT_FOR_CARLA_SECONDS="${WAIT_FOR_CARLA_SECONDS:-420}"
+CARLA_INTERNAL_WAIT_SECONDS="${CARLA_INTERNAL_WAIT_SECONDS:-300}"
 SCENE_RETRY_COUNT="${SCENE_RETRY_COUNT:-2}"
 SCENE_RETRY_SLEEP_SECONDS="${SCENE_RETRY_SLEEP_SECONDS:-20}"
+OVERWRITE_SCENE_DIRS="${OVERWRITE_SCENE_DIRS:-1}"
+PYTHON_BIN="${PYTHON_BIN:-.conda/bin/python}"
+GIF_FPS="${GIF_FPS:-10}"
+GIF_STRIDE="${GIF_STRIDE:-2}"
+GIF_CAM_WIDTH="${GIF_CAM_WIDTH:-320}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -45,8 +55,8 @@ while ! nc -z "$CARLA_HOST" "$CARLA_PORT" >/dev/null 2>&1; do
   sleep 5
 done
 echo "CARLA server port is open."
-echo "CARLA 내부 초기화 대기 중 (120초)..."
-sleep 120
+echo "CARLA 내부 초기화 대기 중 (${CARLA_INTERNAL_WAIT_SECONDS}초)..."
+sleep "$CARLA_INTERNAL_WAIT_SECONDS"
 echo
 
 echo "Starting CARLA scene collection..."
@@ -57,6 +67,9 @@ echo "SECONDS_PER_SCENE : $SECONDS_PER_SCENE"
 echo "FPS               : $FPS"
 echo "IMAGE             : ${IMAGE_WIDTH}x${IMAGE_HEIGHT}"
 echo "TOWN/WEATHER      : $TOWN / $WEATHER"
+echo "CONTROL_MODE      : $CONTROL_MODE"
+echo "SPEED_CONTROL     : $SPEED_CONTROL"
+echo "SYNC/FIXED_DT     : $SYNCHRONOUS_MODE / $FIXED_DELTA_SECONDS"
 echo
 
 for scene_index in $(seq 0 $((SCENE_COUNT - 1))); do
@@ -64,6 +77,16 @@ for scene_index in $(seq 0 $((SCENE_COUNT - 1))); do
   scene_root="$OUTPUT_ROOT/$scene_name"
   seed=$((SPAWN_SEED_BASE + scene_index))
   echo "Collecting $scene_name seed=$seed ..."
+
+  if [[ -e "$scene_root" ]]; then
+    if [[ "$OVERWRITE_SCENE_DIRS" == "1" ]]; then
+      rm -rf "$scene_root"
+    else
+      echo "scene directory already exists: $scene_root" >&2
+      echo "Set OVERWRITE_SCENE_DIRS=1 or choose a new OUTPUT_ROOT." >&2
+      exit 1
+    fi
+  fi
 
   scene_ok=0
   for attempt in $(seq 1 "$SCENE_RETRY_COUNT"); do
@@ -77,13 +100,23 @@ for scene_index in $(seq 0 $((SCENE_COUNT - 1))); do
       --image-width "$IMAGE_WIDTH" \
       --image-height "$IMAGE_HEIGHT" \
       --target-speed-mps "$TARGET_SPEED_MPS" \
+      --speed-control "$SPEED_CONTROL" \
+      --synchronous-mode "$SYNCHRONOUS_MODE" \
+      --fixed-delta-seconds "$FIXED_DELTA_SECONDS" \
       --route-length "$ROUTE_LENGTH" \
+      --driving-stack "$CONTROL_MODE" \
       --town "$TOWN" \
       --weather "$WEATHER" \
       --spawn-seed "$seed"; then
       scene_ok=1
       break
     fi
+    if [[ -s "$scene_root/metadata.jsonl" ]]; then
+      echo "$scene_name command returned non-zero, but metadata exists; accepting scene."
+      scene_ok=1
+      break
+    fi
+    rm -rf "$scene_root"
     echo "$scene_name failed; waiting ${SCENE_RETRY_SLEEP_SECONDS}s before retry..."
     sleep "$SCENE_RETRY_SLEEP_SECONDS"
   done
@@ -98,6 +131,17 @@ for scene_index in $(seq 0 $((SCENE_COUNT - 1))); do
     exit 1
   fi
   cat "$scene_root/metadata.jsonl" >> "$COMBINED_METADATA"
+
+  echo "Rendering GIF for $scene_name ..."
+  "$PYTHON_BIN" scripts/render_scene_gif.py \
+    --scene-dir "$scene_root" \
+    --gif-fps "$GIF_FPS" \
+    --stride "$GIF_STRIDE" \
+    --cam-width "$GIF_CAM_WIDTH" || echo "Warning: GIF render failed for $scene_name (non-fatal)"
+
+  echo "Rendering BEV/control report for $scene_name ..."
+  MPLCONFIGDIR=.matplotlib_cache "$PYTHON_BIN" scripts/render_scene_report.py \
+    --scene-dir "$scene_root" || echo "Warning: scene report render failed for $scene_name (non-fatal)"
 done
 
 FRAME_COUNT="$(wc -l < "$COMBINED_METADATA" | tr -d ' ')"
@@ -113,6 +157,9 @@ cat > "$SUMMARY_PATH" <<EOF
   "image_width": $IMAGE_WIDTH,
   "image_height": $IMAGE_HEIGHT,
   "target_speed_mps": $TARGET_SPEED_MPS,
+  "speed_control": "$SPEED_CONTROL",
+  "synchronous_mode": "$SYNCHRONOUS_MODE",
+  "fixed_delta_seconds": $FIXED_DELTA_SECONDS,
   "route_length": $ROUTE_LENGTH,
   "town": "$TOWN",
   "weather": "$WEATHER",

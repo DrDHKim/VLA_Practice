@@ -1,10 +1,14 @@
 """CARLA data collection script.
 
+Driving stack: CARLA Traffic Manager autopilot only.
+
 AutoVLA-aligned I/O:
 - 3 cameras: front (0°), front-left (-60°), front-right (+60°)
 - 4 temporal frames per camera @ 0.5 s intervals (fps=10 → every 5 frames)
 - T=10 future waypoints as (Δx, Δy, Δθ) in ego frame, 0.5 s per step
 - ego_accel_mps2 (scalar), ego_heading_rad (CARLA world yaw, radians)
+- route_command: derived in post-process from future yaw delta
+  (lookahead ~2 s). Positive Δyaw in CARLA's left-handed frame = right turn.
 
 Post-processing note: raw frames are buffered first, then JSONL is written
 after the full episode so temporal look-ahead is always available.
@@ -29,10 +33,7 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from vla_drive.simulation.carla_agent import CarlaVLAAgent
 from vla_drive.simulation.carla_client import CarlaClient
-from vla_drive.simulation.pid_controller import PIDWaypointController
-from vla_drive.simulation.route_planner import RoutePlanner
 from vla_drive.utils.io import JsonlWriter, ensure_dir
 
 
@@ -43,6 +44,10 @@ HIST_STEP = 5    # frames between temporal history samples
 FUTURE_STEP = 5  # frames between future waypoint steps
 N_HISTORY = 3    # how many past temporal frames to include (t-0.5s, t-1s, t-1.5s)
 N_FUTURE = 10    # planning horizon (T=10 → 5 s)
+
+# Route command labelling: look ~2 s ahead and compare yaw delta.
+CMD_LOOKAHEAD_FRAMES = 20  # 2 s @ fps=10
+CMD_YAW_THRESHOLD_RAD = 0.35
 
 
 # ─────────────────────────── config helpers ──────────────────────────────────
@@ -121,6 +126,20 @@ def _spawn_vehicle(world: Any, preferred_filter: str) -> Any:
     raise RuntimeError("Could not spawn ego vehicle")
 
 
+def _build_fixed_route(world: Any, spawn_transform: Any, route_length: int, spacing_m: float) -> list[Any]:
+    from vla_drive.simulation.route_planner import RoutePlanner
+
+    planner = RoutePlanner(
+        world=world,
+        route_length=route_length,
+        waypoint_spacing_m=spacing_m,
+        lookahead_count=N_FUTURE,
+    )
+    route = planner.build_from_spawn(spawn_transform)
+    if len(route) < 2:
+        raise RuntimeError("Could not build fixed route from spawn point")
+    return route
+
 def _spawn_rgb_camera(
     world: Any,
     vehicle: Any,
@@ -128,11 +147,11 @@ def _spawn_rgb_camera(
     height: int,
     fov: float,
     fps: float,
-    x: float = 1.6,
+    x: float = 2.2,
     y: float = 0.0,
-    z: float = 1.7,
+    z: float = 2.0,
     yaw: float = 0.0,
-    pitch: float = -5.0,
+    pitch: float = -8.0,
 ) -> Any:
     import carla
 
@@ -184,6 +203,15 @@ def _world_to_ego_delta(
     return dx_ego, dy_ego, dh
 
 
+def _command_from_yaw_delta(dh: float) -> str:
+    """CARLA yaw is left-handed; +Δyaw means the vehicle turned right."""
+    if dh > CMD_YAW_THRESHOLD_RAD:
+        return "turn_right"
+    if dh < -CMD_YAW_THRESHOLD_RAD:
+        return "turn_left"
+    return "lane_follow"
+
+
 # ─────────────────────────── path helpers ────────────────────────────────────
 
 def _normalize_output_root(path: Path) -> Path:
@@ -194,9 +222,16 @@ def _normalize_output_root(path: Path) -> Path:
 
 def _metadata_path(path: Path) -> str:
     text = str(path)
-    if os.name == "nt" and text.lower().startswith("z:\\"):
-        return "/" + text[3:].replace("\\", "/")
-    return text.replace("\\", "/")
+    normalized = text.replace("\\", "/")
+    if os.name == "nt":
+        lower = normalized.lower()
+        if lower.startswith("z:/"):
+            return "/" + normalized[3:]
+        if lower.startswith("d:/"):
+            return "/Volumes/DATASET/" + normalized[3:]
+        if lower.startswith("y:/"):
+            return "/Users/donghyunkim/" + normalized[3:]
+    return normalized
 
 
 def _drain_queue(q: queue.Queue[Any]) -> None:
@@ -223,13 +258,21 @@ def collect(config: dict[str, Any], output_root: Path | None = None) -> Path:
     out_root = ensure_dir(out_root)
     frames_dir = ensure_dir(out_root / "images")
     metadata_path = out_root / "metadata.jsonl"
+    scene_id = out_root.name
 
     fps = float(collect_cfg.get("fps", 10.0))
     seconds = float(collect_cfg.get("seconds", 30.0))
     warmup_seconds = float(collect_cfg.get("warmup_seconds", 2.0))
     frame_count = max(1, int(seconds * fps))
     fixed_delta_seconds = float(sim_cfg.get("fixed_delta_seconds", 1.0 / fps))
+    sample_interval_seconds = 1.0 / fps
     timeout = float(sim_cfg.get("timeout_seconds", 120.0))
+    tm_port = int(sim_cfg.get("tm_port", 8000))
+    synchronous_mode = bool(sim_cfg.get("synchronous_mode", True))
+    driving_stack = _normalize_driving_stack(str(collect_cfg.get("driving_stack", "traffic_manager")))
+    min_motion_speed_mps = float(collect_cfg.get("min_motion_speed_mps", 0.2))
+    min_sample_speed_mps = float(collect_cfg.get("min_sample_speed_mps", 0.0))
+    max_sample_brake = float(collect_cfg.get("max_sample_brake", 1.0))
 
     carla_client = CarlaClient(
         host=str(sim_cfg.get("host", "127.0.0.1")),
@@ -237,10 +280,39 @@ def collect(config: dict[str, Any], output_root: Path | None = None) -> Path:
         timeout_seconds=timeout,
         town=str(sim_cfg.get("town", "Town01")),
         weather=str(sim_cfg.get("weather", "ClearNoon")),
-        synchronous_mode=bool(sim_cfg.get("synchronous_mode", True)),
+        synchronous_mode=synchronous_mode,
         fixed_delta_seconds=fixed_delta_seconds,
     )
     world = carla_client.connect()
+    print(
+        "world settings: sync=%s fixed_delta=%s timeout=%.1f fps=%.1f frames=%d"
+        % (synchronous_mode, fixed_delta_seconds if synchronous_mode else None, timeout, fps, frame_count),
+        flush=True,
+    )
+    ticks_per_sample = 1
+    actual_sample_interval_seconds = sample_interval_seconds
+    if synchronous_mode:
+        ticks_per_sample = max(1, int(round(sample_interval_seconds / fixed_delta_seconds)))
+        actual_interval = ticks_per_sample * fixed_delta_seconds
+        actual_sample_interval_seconds = actual_interval
+        if abs(actual_interval - sample_interval_seconds) > 1e-6:
+            print(
+                "warning: sync sample interval %.4fs is approximated by %d ticks = %.4fs"
+                % (sample_interval_seconds, ticks_per_sample, actual_interval),
+                flush=True,
+            )
+        print("sync sampling: ticks_per_sample=%d" % ticks_per_sample, flush=True)
+
+    tm = None
+    actual_tm_port = tm_port
+    if driving_stack == "traffic_manager":
+        tm = carla_client.client.get_trafficmanager(tm_port)
+        # Traffic Manager sync mode must match world sync mode. If TM is sync while
+        # the world is async, autopilot can silently produce zero controls.
+        tm.set_synchronous_mode(synchronous_mode)
+        tm.set_global_distance_to_leading_vehicle(2.5)
+        actual_tm_port = int(tm.get_port())
+        print("traffic_manager port: requested=%d actual=%d" % (tm_port, actual_tm_port), flush=True)
 
     front_q: queue.Queue[Any] = queue.Queue()
     fl_q: queue.Queue[Any] = queue.Queue()
@@ -250,28 +322,61 @@ def collect(config: dict[str, Any], output_root: Path | None = None) -> Path:
         vehicle = _spawn_vehicle(world, str(collect_cfg.get("vehicle_filter", "vehicle.tesla.model3")))
         carla_client.actors.append(vehicle)
 
-        planner = RoutePlanner(
-            world=world,
-            route_length=int(collect_cfg.get("route_length", 60)),
-            waypoint_spacing_m=float(collect_cfg.get("waypoint_spacing_m", 2.0)),
-            lookahead_count=8,
-        )
-        planner.build_from_spawn(vehicle.get_transform())
-        controller = PIDWaypointController(
-            target_speed_mps=float(collect_cfg.get("target_speed_mps", 5.0))
-        )
-        agent = CarlaVLAAgent(planner, controller)
+        target_speed_mps = float(collect_cfg.get("target_speed_mps", 6.0))
+        target_speed_kmh = target_speed_mps * 3.6
+        route_length = int(collect_cfg.get("route_length", 120))
+        waypoint_spacing_m = float(collect_cfg.get("waypoint_spacing_m", 2.0))
+
+        if driving_stack == "traffic_manager":
+            speed_control = str(collect_cfg.get("speed_control", "percentage"))
+            assumed_speed_limit_kmh = float(collect_cfg.get("assumed_speed_limit_kmh", 30.0))
+            use_fixed_path = bool(collect_cfg.get("use_fixed_path", False))
+
+            if speed_control == "none":
+                pass
+            elif speed_control == "desired":
+                if hasattr(tm, "set_desired_speed"):
+                    tm.set_desired_speed(vehicle, target_speed_kmh)
+                else:
+                    tm.vehicle_percentage_speed_difference(vehicle, 0.0)
+            else:
+                pct_slower = max(
+                    -100.0,
+                    min(95.0, (1.0 - target_speed_kmh / assumed_speed_limit_kmh) * 100.0),
+                )
+                tm.vehicle_percentage_speed_difference(vehicle, pct_slower)
+
+            if use_fixed_path and hasattr(tm, "set_path"):
+                import carla
+
+                fixed_route = _build_fixed_route(world, vehicle.get_transform(), route_length, waypoint_spacing_m)
+                tm.set_path(vehicle, [carla.Location(x=wp.transform.location.x, y=wp.transform.location.y, z=wp.transform.location.z) for wp in fixed_route])
+            tm.auto_lane_change(vehicle, bool(collect_cfg.get("auto_lane_change", False)))
+            tm.ignore_lights_percentage(vehicle, float(collect_cfg.get("ignore_lights_percentage", 100.0)))
+            if hasattr(tm, "ignore_signs_percentage"):
+                tm.ignore_signs_percentage(vehicle, float(collect_cfg.get("ignore_signs_percentage", 100.0)))
+            if hasattr(tm, "ignore_vehicles_percentage"):
+                tm.ignore_vehicles_percentage(vehicle, float(collect_cfg.get("ignore_vehicles_percentage", 100.0)))
+            tm.distance_to_leading_vehicle(vehicle, float(collect_cfg.get("distance_to_leading_vehicle_m", 3.0)))
+            vehicle.set_autopilot(True, actual_tm_port)
+            print(
+                "traffic manager autopilot ON  vehicle=%d  target_speed=%.1f km/h  tm_port=%d  fixed_path=%s"
+                % (int(vehicle.id), target_speed_kmh, actual_tm_port, use_fixed_path),
+                flush=True,
+            )
+        else:
+            raise ValueError("unknown driving_stack: %s" % driving_stack)
 
         img_w = int(collect_cfg.get("image_width", 320))
         img_h = int(collect_cfg.get("image_height", 180))
         fov = float(collect_cfg.get("fov", 90.0))
 
         cam_front = _spawn_rgb_camera(world, vehicle, img_w, img_h, fov, fps,
-                                      x=1.6, y=0.0, z=1.7, yaw=0.0, pitch=-5.0)
+                                      x=2.2, y=0.0, z=2.0, yaw=0.0, pitch=-8.0)
         cam_fl = _spawn_rgb_camera(world, vehicle, img_w, img_h, fov, fps,
-                                   x=1.3, y=-0.3, z=1.7, yaw=-60.0, pitch=-5.0)
+                                   x=2.0, y=-0.45, z=2.0, yaw=-55.0, pitch=-8.0)
         cam_fr = _spawn_rgb_camera(world, vehicle, img_w, img_h, fov, fps,
-                                   x=1.3, y=0.3, z=1.7, yaw=60.0, pitch=-5.0)
+                                   x=2.0, y=0.45, z=2.0, yaw=55.0, pitch=-8.0)
         for cam in (cam_front, cam_fl, cam_fr):
             carla_client.actors.append(cam)
         cam_front.listen(front_q.put)
@@ -281,19 +386,39 @@ def collect(config: dict[str, Any], output_root: Path | None = None) -> Path:
         # ── warmup ──────────────────────────────────────────────────────────
         warmup_ticks = max(1, int(warmup_seconds / fixed_delta_seconds))
         for _ in range(warmup_ticks):
-            control, _, _ = agent.run_step(vehicle)
-            vehicle.apply_control(control)
             carla_client.tick()
         for q in (front_q, fl_q, fr_q):
             _drain_queue(q)
+
+        warmup_ctrl = vehicle.get_control()
+        warmup_speed = _speed_mps(vehicle)
+        print(
+            "post-warmup  spd=%.2f m/s  thr=%.2f  steer=%+.2f  brake=%.2f"
+            % (warmup_speed, float(warmup_ctrl.throttle),
+               float(warmup_ctrl.steer), float(warmup_ctrl.brake)),
+            flush=True,
+        )
+        if warmup_speed < min_motion_speed_mps and abs(float(warmup_ctrl.throttle)) < 1e-3:
+            raise RuntimeError(
+                "autopilot did not move after warmup: "
+                "speed=%.3f m/s throttle=%.3f tm_sync=%s world_sync=%s"
+                % (
+                    warmup_speed,
+                    float(warmup_ctrl.throttle),
+                    synchronous_mode,
+                    synchronous_mode,
+                )
+            )
 
         # ── raw frame buffer ─────────────────────────────────────────────────
         raw: list[dict[str, Any]] = []
 
         for idx in range(frame_count):
-            control, _, command = agent.run_step(vehicle)
-            vehicle.apply_control(control)
-            frame_id = carla_client.tick()
+            frame_id = -1
+            for _ in range(ticks_per_sample):
+                frame_id = carla_client.tick()
+            if idx == 0 or (idx + 1) % max(1, int(fps)) == 0:
+                print("tick idx=%d frame_id=%d" % (idx, frame_id), flush=True)
 
             front_img = front_q.get(timeout=timeout)
             fl_img = fl_q.get(timeout=timeout)
@@ -307,6 +432,7 @@ def collect(config: dict[str, Any], output_root: Path | None = None) -> Path:
             fr_img.save_to_disk(str(p_fr))
 
             t = vehicle.get_transform()
+            control = vehicle.get_control()
             raw.append({
                 "idx": idx,
                 "frame_id": frame_id,
@@ -318,20 +444,33 @@ def collect(config: dict[str, Any], output_root: Path | None = None) -> Path:
                 "yaw_rad": math.radians(t.rotation.yaw),
                 "speed": _speed_mps(vehicle),
                 "accel": _accel_mps2(vehicle),
-                "command": command,
                 "steer": float(control.steer),
                 "throttle": float(control.throttle),
                 "brake": float(control.brake),
             })
+
+        if raw:
+            mean_speed = sum(float(row["speed"]) for row in raw) / len(raw)
+            max_speed = max(float(row["speed"]) for row in raw)
+            print("speed_mean=%.3f  speed_max=%.3f" % (mean_speed, max_speed), flush=True)
+            if max_speed < min_motion_speed_mps:
+                raise RuntimeError(
+                    "collection rejected because vehicle never moved: "
+                    "speed_max=%.3f m/s" % max_speed
+                )
 
         # ── post-process: write JSONL for valid frames ───────────────────────
         min_idx = N_HISTORY * HIST_STEP               # need history
         max_idx = len(raw) - N_FUTURE * FUTURE_STEP   # need future
 
         written = 0
+        skipped_low_quality = 0
         with JsonlWriter(metadata_path) as writer:
             for i in range(min_idx, max_idx):
                 f = raw[i]
+                if float(f["speed"]) < min_sample_speed_mps or float(f["brake"]) > max_sample_brake:
+                    skipped_low_quality += 1
+                    continue
                 hist = [raw[i - j * HIST_STEP] for j in range(1, N_HISTORY + 1)]
                 future_wps = []
                 for step in range(1, N_FUTURE + 1):
@@ -342,11 +481,18 @@ def collect(config: dict[str, Any], output_root: Path | None = None) -> Path:
                     )
                     future_wps.append([round(dx, 4), round(dy, 4), round(dh, 5)])
 
+                cmd_idx = min(len(raw) - 1, i + CMD_LOOKAHEAD_FRAMES)
+                _, _, cmd_dh = _world_to_ego_delta(
+                    f["x"], f["y"], f["yaw_rad"],
+                    raw[cmd_idx]["x"], raw[cmd_idx]["y"], raw[cmd_idx]["yaw_rad"],
+                )
+                route_command = _command_from_yaw_delta(cmd_dh)
+
                 writer.write({
                     "observation": {
-                        "sample_id": "carla_%06d" % i,
+                        "sample_id": "%s_%06d" % (scene_id, i),
                         "frame_index": i,
-                        "timestamp": round(i * fixed_delta_seconds, 4),
+                        "timestamp": round(i * actual_sample_interval_seconds, 4),
                         "camera_front": _metadata_path(f["front"]),
                         "camera_front_left": _metadata_path(f["fl"]),
                         "camera_front_right": _metadata_path(f["fr"]),
@@ -359,7 +505,11 @@ def collect(config: dict[str, Any], output_root: Path | None = None) -> Path:
                         "camera_front_t3": _metadata_path(hist[2]["front"]),
                         "camera_front_left_t3": _metadata_path(hist[2]["fl"]),
                         "camera_front_right_t3": _metadata_path(hist[2]["fr"]),
-                        "route_command": f["command"],
+                        "route_command": route_command,
+                        "ego_position": {
+                            "x": round(f["x"], 4),
+                            "y": round(f["y"], 4),
+                        },
                         "ego_speed_mps": round(f["speed"], 4),
                         "ego_accel_mps2": round(f["accel"], 4),
                         "ego_heading_rad": round(f["yaw_rad"], 5),
@@ -373,14 +523,23 @@ def collect(config: dict[str, Any], output_root: Path | None = None) -> Path:
                 })
                 written += 1
 
-        print("CARLA_COLLECTION_OK")
-        print("metadata=%s" % metadata_path)
-        print("frames_raw=%d  frames_valid=%d" % (frame_count, written))
+        print("CARLA_COLLECTION_OK", flush=True)
+        print("metadata=%s" % metadata_path, flush=True)
+        print(
+            "frames_raw=%d  frames_valid=%d  frames_skipped_low_quality=%d"
+            % (frame_count, written, skipped_low_quality),
+            flush=True,
+        )
         return metadata_path
 
     finally:
         for q in (front_q, fl_q, fr_q):
             _drain_queue(q)
+        try:
+            if tm is not None and synchronous_mode:
+                tm.set_synchronous_mode(False)
+        except Exception:
+            pass
         carla_client.cleanup()
         time.sleep(0.5)
 
@@ -396,10 +555,14 @@ def main() -> None:
     parser.add_argument("--image-width", type=int, default=None)
     parser.add_argument("--image-height", type=int, default=None)
     parser.add_argument("--target-speed-mps", type=float, default=None)
+    parser.add_argument("--speed-control", choices=["none", "desired", "percentage"], default=None)
     parser.add_argument("--route-length", type=int, default=None)
     parser.add_argument("--town", type=str, default=None)
     parser.add_argument("--weather", type=str, default=None)
     parser.add_argument("--spawn-seed", type=int, default=None)
+    parser.add_argument("--driving-stack", choices=["autopilot", "traffic_manager"], default=None)
+    parser.add_argument("--synchronous-mode", choices=["true", "false"], default=None)
+    parser.add_argument("--fixed-delta-seconds", type=float, default=None)
     args = parser.parse_args()
 
     config = _load_config(args.config)
@@ -421,14 +584,29 @@ def _apply_cli_overrides(config: dict[str, Any], args: argparse.Namespace) -> No
         collect_cfg["image_height"] = args.image_height
     if args.target_speed_mps is not None:
         collect_cfg["target_speed_mps"] = args.target_speed_mps
+    if args.speed_control is not None:
+        collect_cfg["speed_control"] = args.speed_control
     if args.route_length is not None:
         collect_cfg["route_length"] = args.route_length
     if args.town is not None:
         sim_cfg["town"] = args.town
     if args.weather is not None:
         sim_cfg["weather"] = args.weather
+    if args.synchronous_mode is not None:
+        sim_cfg["synchronous_mode"] = args.synchronous_mode == "true"
+    if args.fixed_delta_seconds is not None:
+        sim_cfg["fixed_delta_seconds"] = args.fixed_delta_seconds
     if args.spawn_seed is not None:
         random.seed(args.spawn_seed)
+    if args.driving_stack is not None:
+        collect_cfg["driving_stack"] = _normalize_driving_stack(args.driving_stack)
+
+
+def _normalize_driving_stack(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized == "autopilot":
+        return "traffic_manager"
+    return normalized
 
 
 if __name__ == "__main__":

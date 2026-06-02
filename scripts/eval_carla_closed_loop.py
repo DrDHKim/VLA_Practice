@@ -14,9 +14,6 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from vla_drive.evaluation.closed_loop_metrics import RouteEvaluation, aggregate_route_evaluations
-from vla_drive.simulation.carla_agent import CarlaVLAAgent
-from vla_drive.simulation.pid_controller import PIDWaypointController
-from vla_drive.simulation.route_planner import RoutePlanner
 
 
 def _add_carla_paths() -> None:
@@ -54,35 +51,41 @@ def _run_route(world, route_index: int, args) -> RouteEvaluation:
     actors.append(collision_sensor)
     collision_sensor.listen(collision_events.put)
 
-    planner = RoutePlanner(
-        world=world,
-        route_length=args.route_length,
-        waypoint_spacing_m=args.waypoint_spacing_m,
-        lookahead_count=args.future_waypoint_count,
-    )
-    planner.build_from_spawn(vehicle.get_transform())
-    controller = PIDWaypointController(
-        target_speed_mps=args.target_speed_mps,
-        steer_gain=args.steer_gain,
-        speed_kp=args.speed_kp,
-        brake_kp=args.brake_kp,
-    )
-    agent = CarlaVLAAgent(planner, controller)
+    client = world.get_client()
+    traffic_manager = client.get_trafficmanager(args.tm_port)
+    traffic_manager.set_synchronous_mode(False)
+    traffic_manager.set_global_distance_to_leading_vehicle(args.distance_to_leading_vehicle_m)
+    if hasattr(traffic_manager, "set_desired_speed"):
+        traffic_manager.set_desired_speed(vehicle, args.target_speed_mps * 3.6)
+    else:
+        traffic_manager.vehicle_percentage_speed_difference(vehicle, args.speed_percentage_difference)
+    traffic_manager.auto_lane_change(vehicle, args.auto_lane_change)
+    traffic_manager.ignore_lights_percentage(vehicle, args.ignore_lights_percentage)
+    if hasattr(traffic_manager, "ignore_signs_percentage"):
+        traffic_manager.ignore_signs_percentage(vehicle, args.ignore_signs_percentage)
+    if hasattr(traffic_manager, "ignore_vehicles_percentage"):
+        traffic_manager.ignore_vehicles_percentage(vehicle, args.ignore_vehicles_percentage)
+    vehicle.set_autopilot(True, traffic_manager.get_port())
+
+    start_location = vehicle.get_transform().location
+    max_distance_m = 0.0
 
     try:
         ticks = max(1, int(args.route_seconds * args.fps))
         for _ in range(ticks):
-            control, _, _ = agent.run_step(vehicle)
-            vehicle.apply_control(control)
             world.wait_for_tick(seconds=args.timeout)
-        planner.update(vehicle.get_transform())
+            max_distance_m = max(max_distance_m, start_location.distance(vehicle.get_transform().location))
         collision_count = _queue_size(collision_events)
         return RouteEvaluation(
             route_id=f"route_{route_index:03d}",
-            route_completion=planner.route_completion(),
+            route_completion=min(1.0, max_distance_m / max(1e-3, args.route_completion_distance_m)),
             collision_count=collision_count,
         )
     finally:
+        try:
+            vehicle.set_autopilot(False)
+        except Exception:
+            pass
         for actor in reversed(actors):
             try:
                 actor.destroy()
@@ -117,13 +120,15 @@ def main() -> None:
     parser.add_argument("--route-seconds", type=float, default=8.0)
     parser.add_argument("--fps", type=float, default=10.0)
     parser.add_argument("--target-speed-mps", type=float, default=5.0)
-    parser.add_argument("--steer-gain", type=float, default=1.2)
-    parser.add_argument("--speed-kp", type=float, default=0.35)
-    parser.add_argument("--brake-kp", type=float, default=0.25)
+    parser.add_argument("--tm-port", type=int, default=8000)
+    parser.add_argument("--speed-percentage-difference", type=float, default=0.0)
+    parser.add_argument("--auto-lane-change", action="store_true")
+    parser.add_argument("--ignore-lights-percentage", type=float, default=100.0)
+    parser.add_argument("--ignore-signs-percentage", type=float, default=100.0)
+    parser.add_argument("--ignore-vehicles-percentage", type=float, default=100.0)
+    parser.add_argument("--distance-to-leading-vehicle-m", type=float, default=3.0)
+    parser.add_argument("--route-completion-distance-m", type=float, default=40.0)
     parser.add_argument("--spawn-start-index", type=int, default=0)
-    parser.add_argument("--route-length", type=int, default=80)
-    parser.add_argument("--waypoint-spacing-m", type=float, default=2.0)
-    parser.add_argument("--future-waypoint-count", type=int, default=8)
     parser.add_argument("--report-path", type=Path, default=Path("/Volumes/DATASET/vla_drive_carla/closed_loop_report.json"))
     args = parser.parse_args()
 

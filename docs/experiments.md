@@ -6,7 +6,7 @@
 
 - VLM backbone
 - waypoint regression action head
-- CARLA 안의 PID/MPC controller
+- CARLA Traffic Manager autopilot data collection
 - LoRA/QLoRA fine-tuning
 
 OpenDriveVLA/AutoVLA는 architecture reference로 사용한다. Alpamayo는 local pipeline이 안정되기 전까지 large baseline 또는 teacher로만 본다.

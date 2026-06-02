@@ -53,7 +53,7 @@ waypoint head
 future waypoints
         |
         v
-PID/MPC controller
+CARLA Traffic Manager autopilot log
         |
         v
 steer / throttle / brake
@@ -80,9 +80,7 @@ connect -> spawn -> sense -> predict waypoints -> control -> log -> cleanup
 구현 파일:
 
 - `src/vla_drive/simulation/carla_client.py`
-- `src/vla_drive/simulation/carla_agent.py`
 - `src/vla_drive/simulation/route_planner.py`
-- `src/vla_drive/simulation/pid_controller.py`
 - `scripts/collect_carla_data.py`
 - `scripts/eval_carla.sh`
 

@@ -10,7 +10,7 @@ class Observation:
     sample_id: str
     timestamp: float
 
-    # ── Current frame, 3 cameras ──────────────────────────────────────────────
+    # ── Current frame, 3 cameras ──────────────────────
     camera_front: Path
     camera_front_left: Optional[Path] = None
     camera_front_right: Optional[Path] = None
@@ -32,6 +32,7 @@ class Observation:
     ego_speed_mps: float = 0.0
     ego_accel_mps2: Optional[float] = None   # scalar magnitude
     ego_heading_rad: Optional[float] = None  # yaw in CARLA world frame (radians)
+    ego_yaw_rate_radps: Optional[float] = None  # yaw rate (angular velocity)
 
 
 @dataclass(frozen=True)

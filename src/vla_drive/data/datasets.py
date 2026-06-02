@@ -53,6 +53,7 @@ class JsonlDrivingDataset(Dataset):
                 ego_speed_mps=float(obs.get("ego_speed_mps", 0.0)),
                 ego_accel_mps2=obs.get("ego_accel_mps2"),
                 ego_heading_rad=obs.get("ego_heading_rad"),
+                ego_yaw_rate_radps=obs.get("ego_yaw_rate_radps"),  # Added for OpenDriveVLA
             ),
             target=ActionTarget(
                 future_waypoints_ego=target["future_waypoints_ego"],

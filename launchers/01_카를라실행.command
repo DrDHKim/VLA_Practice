@@ -7,7 +7,7 @@ set -euo pipefail
 # ============================================================
 
 CARLA_PORT=2000
-CARLA_QUALITY=Epic
+CARLA_QUALITY=Low
 CARLA_MAP=/Game/Carla/Maps/Town01
 KILL_EXISTING=1
 FORCE_LOW_SETTINGS=1
@@ -17,6 +17,7 @@ RESX=800
 RESY=600
 NO_SOUND=1
 RENDER_OFFSCREEN=0
+CARLA_FPS=30
 EXTRA_ARGS=()
 
 # RGB 렌더링은 CrossOver 64-bit + D3DMetal bottle을 기본으로 사용한다.
@@ -126,12 +127,13 @@ fi
 if [[ "$NO_SOUND" == "1" ]]; then
   EXTRA_ARGS+=("-nosound")
 fi
-EXTRA_ARGS+=("-NoVSync" "-fps=15")
+EXTRA_ARGS+=("-NoVSync" "-fps=$CARLA_FPS")
 
 echo "Starting CARLA..."
 echo "REPO_ROOT : $REPO_ROOT"
 echo "PORT      : $CARLA_PORT"
 echo "QUALITY   : $CARLA_QUALITY"
+echo "FPS CAP   : $CARLA_FPS"
 echo "BACKEND   : CrossOver D3DMetal"
 echo "BOTTLE    : $CARLA_CROSSOVER_BOTTLE"
 echo "ARGS      : ${EXTRA_ARGS[*]:-}"

@@ -4,13 +4,13 @@
 
 ## Model Selection
 
-처음 구현은 `Qwen2.5-VL/LLaVA style VLM + waypoint regression head + CARLA PID controller`로 시작한다. OpenDriveVLA와 AutoVLA는 구조를 참고하되, 공개 구현이 안정화되기 전까지 그대로 복제하지 않는다.
+처음 구현은 `Qwen2.5-VL/LLaVA style VLM + waypoint regression head + CARLA Traffic Manager autopilot data`로 시작한다. OpenDriveVLA와 AutoVLA는 구조를 참고하되, 공개 구현이 안정화되기 전까지 그대로 복제하지 않는다.
 
 선택 이유:
 
 - MacBook에서 CARLA data collection, 작은 training, 작은 evaluation을 가능한 범위까지 수행할 수 있어야 한다.
 - RTX 5090 32GB는 MacBook 리소스 한계가 기록된 뒤 LoRA/QLoRA 실험을 확장하는 장비로 사용한다.
-- closed-loop driving에서는 action token을 바로 control로 내는 것보다 future waypoint를 예측하고 controller로 변환하는 편이 디버깅 가능하다.
+- 초기 데이터 수집은 직접 제어기를 만들지 않고 CARLA Traffic Manager autopilot의 trajectory/control log를 사용한다.
 - reasoning text는 safety 검증 수단이지, 초기 control loop의 필수 조건이 아니다.
 - AIP/H100은 irreversible environment로 취급한다. MacBook/RTX 5090에서 가능한 축소/최적화 실험을 모두 시도하기 전에는 쓰지 않는다.
 
@@ -29,9 +29,6 @@ pooled hidden state
       |
       v
 waypoint head -> future waypoints in ego frame
-      |
-      v
-PID/MPC controller -> steer/throttle/brake
 ```
 
 기본 first run:

@@ -28,7 +28,7 @@
    - CARLA RGB 카메라 + ego state + route command 입력
    - Qwen2.5-VL 또는 LLaVA 계열 backbone
    - action head는 waypoint regression으로 시작
-   - 추론은 `throttle`, `steer`, `brake` 직접 출력보다 future waypoints 출력 후 PID/MPC controller로 변환
+   - 학습 target은 CARLA Traffic Manager autopilot의 실제 trajectory와 control log에서 만든다.
 
 ## 하드웨어 전환 원칙
 
@@ -89,9 +89,7 @@
 │   │   └── evaluator.py
 │   ├── simulation/
 │   │   ├── carla_client.py
-│   │   ├── carla_agent.py
-│   │   ├── route_planner.py
-│   │   └── pid_controller.py
+│   │   └── route_planner.py
 │   └── utils/
 │       ├── logging.py
 │       ├── seed.py
@@ -119,13 +117,11 @@
 - `docs/setup.md`를 기준으로 MacBook 소규모 시범 환경을 먼저 만든다.
 - Qwen3 Coder는 새 파일을 만들기 전에 반드시 이 README와 `project_plan.md`를 먼저 읽는다.
 
-### Phase 1: 최소 CARLA 주행 파이프라인
+### Phase 1: 최소 CARLA 수집 파이프라인
 
-- 목표: 학습 없이도 CARLA에서 센서 수집, route command, PID 제어가 동작하게 만들기
+- 목표: CARLA Traffic Manager autopilot으로 센서 수집, route command, trajectory/control log가 동작하게 만들기
 - 구현 파일:
   - `src/vla_drive/simulation/carla_client.py`
-  - `src/vla_drive/simulation/carla_agent.py`
-  - `src/vla_drive/simulation/pid_controller.py`
   - `scripts/collect_carla_data.py`
 
 ### Phase 2: 작은 VLA policy 구현

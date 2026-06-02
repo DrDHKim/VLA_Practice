@@ -68,3 +68,4 @@ MPLCONFIGDIR=.matplotlib_cache .conda/bin/python -m pytest
 - 긴 `@file` 또는 전체 문서 context injection을 피한다. 어떤 파일을 왜 읽는지 명시한다.
 - 복잡한 명령은 긴 설명보다 `scripts/` 안의 단순 script로 만들고 그 script를 문서화한다.
 - custom skill, command, subagent는 초기에 많이 만들지 않는다. workflow가 반복되고 안정된 뒤 추가한다.
+- 파일의 생성이 필요한 경우 continue환경에서 동작하지 않을 수 있으니, 사용자에게 생성을 요청한다.

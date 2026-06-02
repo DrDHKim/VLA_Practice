@@ -14,8 +14,12 @@ PYTHONIOENCODING=utf-8 "$WINE_BIN" --bottle "$BOTTLE" --cx-app 'C:\Python37\pyth
   --route-count "${ROUTE_COUNT:-5}" \
   --route-seconds "${ROUTE_SECONDS:-8}" \
   --target-speed-mps "${TARGET_SPEED_MPS:-5.0}" \
-  --steer-gain "${STEER_GAIN:-1.2}" \
-  --speed-kp "${SPEED_KP:-0.35}" \
-  --brake-kp "${BRAKE_KP:-0.25}" \
+  --tm-port "${TM_PORT:-8000}" \
+  --speed-percentage-difference "${SPEED_PERCENTAGE_DIFFERENCE:-0.0}" \
+  --ignore-lights-percentage "${IGNORE_LIGHTS_PERCENTAGE:-100.0}" \
+  --ignore-signs-percentage "${IGNORE_SIGNS_PERCENTAGE:-100.0}" \
+  --ignore-vehicles-percentage "${IGNORE_VEHICLES_PERCENTAGE:-100.0}" \
+  --distance-to-leading-vehicle-m "${DISTANCE_TO_LEADING_VEHICLE_M:-3.0}" \
+  --route-completion-distance-m "${ROUTE_COMPLETION_DISTANCE_M:-40.0}" \
   --spawn-start-index "${SPAWN_START_INDEX:-0}" \
   --report-path "$REPORT_PATH"
