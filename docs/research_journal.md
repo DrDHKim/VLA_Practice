@@ -1367,3 +1367,127 @@ rg -n "run_data_collection|data_collector|high_level_command_generator|test_high
 
 - 현재 코드 참조는 남지 않았다.
 - `scripts/render_carla_smoke_video.py`, `scripts/render_carla_trajectory_video.py` 이름은 과거 연구일지 기록에만 남아 있다.
+
+## 2026-06-02: TASKS 현재 작업 대상 갱신
+
+데이터 수집을 다시 시작하기 전에 `TASKS.md`를 최신 파이프라인 기준으로 정리했다.
+
+변경:
+
+- 현재 구현 대상을 `M10D: Autopilot Sync Dataset Collection and Validation`으로 지정했다.
+- M10D를 추가해 MacBook에서 새 sync/autopilot dataset 수집, scene GIF/report 검수, DataLoader smoke, tiny training, open-loop/closed-loop baseline 평가, 문서 기록 순서를 명시했다.
+- M3 waypoint output shape를 현재 schema와 맞게 `[B, T, 3]`으로 수정했다.
+- M6 목표를 Traffic Manager autopilot baseline 평가로 명확히 했다.
+- M10C 완료 기준에서 “brake 반복이 사라짐”처럼 과한 표현을 제거하고, 남은 throttle/brake 변동은 scene report에 드러나야 한다고 정리했다.
+
+## 2026-06-02: route command lookahead 공용화
+
+학습 수집과 이후 모델 closed-loop 평가에서 `route_command`가 같은 기준으로 생성되도록 공용 helper를 추가했다.
+
+변경:
+
+- `src/vla_drive/simulation/route_command.py`
+  - CARLA yaw sign convention을 공용화했다.
+  - positive yaw delta는 `turn_right`, negative yaw delta는 `turn_left`로 고정했다.
+  - lookahead는 `meters` 또는 `frames` mode를 지원한다.
+- `scripts/collect_carla_data.py`
+  - 기존 hard-coded `20 frames` lookahead 대신 config/CLI 입력을 사용한다.
+  - 기본값은 `route_command_lookahead_mode=meters`, `route_command_lookahead_meters=30.0`이다.
+  - 필요하면 `route_command_lookahead_mode=frames`, `route_command_lookahead_frames=20`으로 기존 방식에 가깝게 되돌릴 수 있다.
+- `scripts/collect_carla_scenes.sh`, `launchers/06_데이터수집.command`
+  - route command lookahead mode/meters/frames/yaw threshold 변수를 노출했다.
+- `src/vla_drive/simulation/route_planner.py`
+  - `next_command()`이 같은 공용 helper를 사용하게 바꿨다.
+
+의도:
+
+- 학습 dataset에서 command가 30m 전에 나오도록 수집했다면, 모델 평가/closed-loop에서도 `30m` lookahead로 같은 command prompt를 넣을 수 있게 한다.
+- 기존 `RoutePlanner.next_command()`의 좌우 sign이 수집 label과 반대였던 문제를 제거한다.
+
+검증 예정:
+
+- `tests/unit/test_route_command.py`로 meters/frames lookahead와 CARLA yaw sign convention을 검증한다.
+
+추가 수정:
+
+- CrossOver CARLA bottle은 Python 3.7을 사용하므로 `typing.Literal` import가 실패했다.
+- `route_command.py`에서 `Literal` 타입힌트를 제거해 Python 3.7 호환으로 수정했다.
+
+검증:
+
+```text
+PYTHONIOENCODING=utf-8 /Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine --bottle carla-rgb64 --cx-app 'C:\Python37\python.exe' -c "..."
+```
+
+결과:
+
+```text
+turn_right
+```
+
+## 2026-06-02: 신호등/앞차/보행자 반응 수집 설정 추가
+
+다음 수집 batch부터 신호등 정지, 앞차 정지, random walker crossing에 따른 감속/정지 샘플을 포함하도록 수집 설정을 바꿨다.
+
+원칙:
+
+- 모델 입력에는 `traffic_light_state`, pedestrian state, lead vehicle state를 직접 넣지 않는다.
+- 입력은 기존처럼 RGB image + route command + ego speed를 유지한다.
+- 정지/대기/출발 이유는 화면에서 학습하게 두고, target은 Traffic Manager autopilot trajectory/control log를 사용한다.
+
+변경:
+
+- `src/vla_drive/configs/carla_mac_dataset.yaml`, `src/vla_drive/configs/carla_rgb_waypoint.yaml`
+  - `ignore_lights_percentage: 0.0`
+  - `ignore_signs_percentage: 0.0`
+  - `ignore_vehicles_percentage: 0.0`
+  - NPC vehicle 수와 walker 수/cross factor/running percentage 기본값 추가
+- `launchers/06_데이터수집.command`, `scripts/collect_carla_scenes.sh`
+  - `IGNORE_LIGHTS_PERCENTAGE`, `IGNORE_SIGNS_PERCENTAGE`, `IGNORE_VEHICLES_PERCENTAGE`
+  - `NPC_VEHICLE_COUNT`, `NPC_VEHICLE_TARGET_SPEED_MPS`
+  - `PEDESTRIAN_COUNT`, `PEDESTRIAN_CROSS_FACTOR`, `PEDESTRIAN_RUNNING_PERCENTAGE`
+  - 위 변수를 상단에서 조정할 수 있게 했다.
+- `scripts/collect_carla_data.py`
+  - Traffic Manager autopilot NPC vehicle spawn 추가.
+  - walker AI controller와 `world.set_pedestrians_cross_factor()` 기반 random crossing 추가.
+  - walker crossing은 랜덤이므로 특정 frame에 사람을 강제로 튀어나오게 하는 deterministic scenario runner는 아니다.
+
+현재 기본:
+
+```text
+ignore_lights/signs/vehicles = 0/0/0
+npc_vehicle_count = 20
+npc_vehicle_filter = vehicle.tesla.model3
+pedestrian_count = 30
+pedestrian_cross_factor = 0.7
+pedestrian_running_percentage = 0.1
+```
+
+추가 수정:
+
+- random NPC 차량에 큰 트럭/버스가 섞여 회전 중 멈추는 문제가 있어 기본 NPC vehicle filter를 `vehicle.tesla.model3`로 제한했다.
+- `launchers/06_데이터수집.command`, `scripts/collect_carla_scenes.sh`, config에서 `NPC_VEHICLE_FILTER`를 조정할 수 있게 했다.
+
+## 2026-06-03: Mac scene 재수집 skip/overwrite 정책 확인
+
+`06_데이터수집.command` 실행 중 기존 `/Volumes/DATASET/vla_drive_carla/mac_scenes/scene_000` 때문에 수집이 중단됐다.
+
+원인:
+
+- `scripts/collect_carla_scenes.sh`의 기존 skip 정책은 완료된 scene도 에러로 처리했다.
+- 기존 `OVERWRITE_SCENE_DIRS=0` 동작은 완료된 scene도 에러로 처리했다.
+- combined `metadata.jsonl`은 수집 시작 시 새로 생성되므로 완료된 scene을 skip하려면 scene별 `metadata.jsonl`을 다시 합쳐야 한다.
+
+변경:
+
+- `launchers/06_데이터수집.command`와 `scripts/collect_carla_scenes.sh` 기본 `OVERWRITE_SCENE_DIRS`는 `0`으로 둔다.
+- `scripts/collect_carla_scenes.sh`에서 기존 scene에 non-empty `metadata.jsonl`이 있으면 완료된 scene으로 보고 combined metadata에 append한 뒤 다음 scene으로 넘어가게 했다.
+- 기존 scene 디렉터리는 있지만 `metadata.jsonl`이 없거나 비어 있으면 incomplete output으로 보고 해당 scene 디렉터리를 지운 뒤 자동 재수집한다.
+- `collection_summary.json`에 `collected_scene_count`, `skipped_scene_count`를 기록한다.
+- M10D 1번 항목의 scene 수/초/FPS/해상도/overwrite 정책 확인을 완료 처리했다.
+
+재실행:
+
+```bash
+open launchers/06_데이터수집.command
+```

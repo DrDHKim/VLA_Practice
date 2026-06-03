@@ -8,7 +8,7 @@ AutoVLA-aligned I/O:
 - T=10 future waypoints as (Δx, Δy, Δθ) in ego frame, 0.5 s per step
 - ego_accel_mps2 (scalar), ego_heading_rad (CARLA world yaw, radians)
 - route_command: derived in post-process from future yaw delta
-  (lookahead ~2 s). Positive Δyaw in CARLA's left-handed frame = right turn.
+  (default lookahead 30 m). Positive Δyaw in CARLA's left-handed frame = right turn.
 
 Post-processing note: raw frames are buffered first, then JSONL is written
 after the full episode so temporal look-ahead is always available.
@@ -25,7 +25,7 @@ import random
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -34,6 +34,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from vla_drive.simulation.carla_client import CarlaClient
+from vla_drive.simulation.route_command import route_command_from_poses
 from vla_drive.utils.io import JsonlWriter, ensure_dir
 
 
@@ -45,9 +46,17 @@ FUTURE_STEP = 5  # frames between future waypoint steps
 N_HISTORY = 3    # how many past temporal frames to include (t-0.5s, t-1s, t-1.5s)
 N_FUTURE = 10    # planning horizon (T=10 → 5 s)
 
-# Route command labelling: look ~2 s ahead and compare yaw delta.
-CMD_LOOKAHEAD_FRAMES = 20  # 2 s @ fps=10
-CMD_YAW_THRESHOLD_RAD = 0.35
+DEFAULT_ROUTE_COMMAND_LOOKAHEAD_MODE = "meters"
+DEFAULT_ROUTE_COMMAND_LOOKAHEAD_FRAMES = 20  # 2 s @ fps=10
+DEFAULT_ROUTE_COMMAND_LOOKAHEAD_METERS = 30.0
+DEFAULT_ROUTE_COMMAND_YAW_THRESHOLD_RAD = 0.35
+
+# Future waypoint horizon scales with current speed so that a vehicle waiting
+# at a red light or behind a stopped lead car produces near-zero waypoints
+# instead of leaking the future post-stop motion into the training label.
+DEFAULT_WAYPOINT_HORIZON_MODE = "speed_scaled"   # or "fixed_time"
+DEFAULT_WAYPOINT_TIME_HORIZON_S = N_FUTURE * FUTURE_STEP / 10.0  # 5.0 s @ fps=10
+DEFAULT_WAYPOINT_SPEED_REFERENCE_MPS = 5.0       # speed at which horizon = full
 
 
 # ─────────────────────────── config helpers ──────────────────────────────────
@@ -124,6 +133,93 @@ def _spawn_vehicle(world: Any, preferred_filter: str) -> Any:
         if vehicle is not None:
             return vehicle
     raise RuntimeError("Could not spawn ego vehicle")
+
+
+def _spawn_npc_vehicles(
+    world: Any,
+    carla_client: CarlaClient,
+    traffic_manager: Any,
+    traffic_manager_port: int,
+    count: int,
+    vehicle_filter: str,
+    ego_vehicle_id: int,
+    target_speed_mps: Optional[float] = None,
+    auto_lane_change: bool = False,
+) -> list[Any]:
+    if count <= 0:
+        return []
+    blueprints = list(world.get_blueprint_library().filter(vehicle_filter))
+    spawn_points = list(world.get_map().get_spawn_points())
+    random.shuffle(spawn_points)
+    actors = []
+    target_speed_kmh = None if target_speed_mps is None else float(target_speed_mps) * 3.6
+    for transform in spawn_points:
+        if len(actors) >= count:
+            break
+        vehicle_bp = random.choice(blueprints)
+        npc = world.try_spawn_actor(vehicle_bp, transform)
+        if npc is None or int(npc.id) == int(ego_vehicle_id):
+            continue
+        carla_client.actors.append(npc)
+        npc.set_autopilot(True, traffic_manager_port)
+        traffic_manager.auto_lane_change(npc, bool(auto_lane_change))
+        if target_speed_kmh is not None:
+            if hasattr(traffic_manager, "set_desired_speed"):
+                traffic_manager.set_desired_speed(npc, target_speed_kmh)
+            else:
+                traffic_manager.vehicle_percentage_speed_difference(npc, 0.0)
+        actors.append(npc)
+    return actors
+
+
+def _spawn_walkers(
+    world: Any,
+    carla_client: CarlaClient,
+    count: int,
+    cross_factor: float,
+    running_percentage: float,
+    walk_speed_mps: float,
+    run_speed_mps: float,
+) -> list[Any]:
+    if count <= 0:
+        return []
+    blueprints = list(world.get_blueprint_library().filter("walker.pedestrian.*"))
+    controller_bp = world.get_blueprint_library().find("controller.ai.walker")
+    walkers = []
+    controllers = []
+    if hasattr(world, "set_pedestrians_cross_factor"):
+        world.set_pedestrians_cross_factor(max(0.0, min(1.0, float(cross_factor))))
+    for _ in range(count):
+        location = world.get_random_location_from_navigation()
+        if location is None:
+            continue
+        import carla
+
+        walker_bp = random.choice(blueprints)
+        if walker_bp.has_attribute("is_invincible"):
+            walker_bp.set_attribute("is_invincible", "false")
+        walker = world.try_spawn_actor(walker_bp, carla.Transform(location))
+        if walker is None:
+            continue
+        carla_client.actors.append(walker)
+        controller = world.try_spawn_actor(controller_bp, carla.Transform(), walker)
+        if controller is None:
+            continue
+        carla_client.actors.append(controller)
+        controllers.append(controller)
+        walkers.append(walker)
+
+    for controller in controllers:
+        try:
+            controller.start()
+            destination = world.get_random_location_from_navigation()
+            if destination is not None:
+                controller.go_to_location(destination)
+            speed = run_speed_mps if random.random() < running_percentage else walk_speed_mps
+            controller.set_max_speed(float(speed))
+        except Exception:
+            pass
+    return walkers
 
 
 def _build_fixed_route(world: Any, spawn_transform: Any, route_length: int, spacing_m: float) -> list[Any]:
@@ -203,13 +299,34 @@ def _world_to_ego_delta(
     return dx_ego, dy_ego, dh
 
 
-def _command_from_yaw_delta(dh: float) -> str:
-    """CARLA yaw is left-handed; +Δyaw means the vehicle turned right."""
-    if dh > CMD_YAW_THRESHOLD_RAD:
-        return "turn_right"
-    if dh < -CMD_YAW_THRESHOLD_RAD:
-        return "turn_left"
-    return "lane_follow"
+def _waypoint_frame_offsets(
+    mode: str,
+    current_speed_mps: float,
+    fps: float,
+    time_horizon_s: float,
+    speed_reference_mps: float,
+    n_future: int,
+    fixed_step_frames: int,
+) -> list[int]:
+    """Return frame offsets for the N_FUTURE future waypoints.
+
+    ``speed_scaled`` shrinks the time horizon proportionally to current speed:
+    at ``current_speed=0`` all offsets collapse to the next frame (so a vehicle
+    waiting at a red light produces near-zero waypoints), and at
+    ``speed_reference_mps`` the horizon matches ``time_horizon_s``.
+    ``fixed_time`` falls back to the original uniform frame spacing.
+    """
+    n_future = max(1, int(n_future))
+    if mode == "fixed_time":
+        return [step * fixed_step_frames for step in range(1, n_future + 1)]
+    if mode != "speed_scaled":
+        raise ValueError(f"Unsupported waypoint_horizon_mode: {mode}")
+
+    ratio = 0.0
+    if speed_reference_mps > 1e-6:
+        ratio = max(0.0, min(1.0, float(current_speed_mps) / float(speed_reference_mps)))
+    frames_horizon = max(0, int(round(time_horizon_s * fps * ratio)))
+    return [max(1, int(round(frames_horizon * k / n_future))) for k in range(1, n_future + 1)]
 
 
 # ─────────────────────────── path helpers ────────────────────────────────────
@@ -240,6 +357,15 @@ def _drain_queue(q: queue.Queue[Any]) -> None:
             q.get_nowait()
         except queue.Empty:
             return
+
+
+def _stop_walker_controllers(actors: list[Any]) -> None:
+    for actor in actors:
+        try:
+            if getattr(actor, "type_id", "") == "controller.ai.walker" and actor.is_alive:
+                actor.stop()
+        except Exception:
+            pass
 
 
 # ─────────────────────────── main collect ────────────────────────────────────
@@ -273,6 +399,42 @@ def collect(config: dict[str, Any], output_root: Path | None = None) -> Path:
     min_motion_speed_mps = float(collect_cfg.get("min_motion_speed_mps", 0.2))
     min_sample_speed_mps = float(collect_cfg.get("min_sample_speed_mps", 0.0))
     max_sample_brake = float(collect_cfg.get("max_sample_brake", 1.0))
+    route_command_lookahead_mode = str(
+        collect_cfg.get("route_command_lookahead_mode", DEFAULT_ROUTE_COMMAND_LOOKAHEAD_MODE)
+    )
+    route_command_lookahead_frames = int(
+        collect_cfg.get("route_command_lookahead_frames", DEFAULT_ROUTE_COMMAND_LOOKAHEAD_FRAMES)
+    )
+    route_command_lookahead_meters = float(
+        collect_cfg.get("route_command_lookahead_meters", DEFAULT_ROUTE_COMMAND_LOOKAHEAD_METERS)
+    )
+    route_command_yaw_threshold_rad = float(
+        collect_cfg.get("route_command_yaw_threshold_rad", DEFAULT_ROUTE_COMMAND_YAW_THRESHOLD_RAD)
+    )
+    waypoint_horizon_mode = str(
+        collect_cfg.get("waypoint_horizon_mode", DEFAULT_WAYPOINT_HORIZON_MODE)
+    )
+    waypoint_time_horizon_s = float(
+        collect_cfg.get("waypoint_time_horizon_s", DEFAULT_WAYPOINT_TIME_HORIZON_S)
+    )
+    waypoint_speed_reference_mps = float(
+        collect_cfg.get(
+            "waypoint_speed_reference_mps",
+            float(collect_cfg.get("target_speed_mps", DEFAULT_WAYPOINT_SPEED_REFERENCE_MPS)),
+        )
+    )
+    npc_vehicle_count = int(collect_cfg.get("npc_vehicle_count", 0))
+    npc_vehicle_filter = str(collect_cfg.get("npc_vehicle_filter", "vehicle.*"))
+    npc_vehicle_target_speed_mps_raw = collect_cfg.get("npc_vehicle_target_speed_mps")
+    npc_vehicle_target_speed_mps = (
+        None if npc_vehicle_target_speed_mps_raw in {None, ""} else float(npc_vehicle_target_speed_mps_raw)
+    )
+    npc_vehicle_auto_lane_change = bool(collect_cfg.get("npc_vehicle_auto_lane_change", False))
+    pedestrian_count = int(collect_cfg.get("pedestrian_count", 0))
+    pedestrian_cross_factor = float(collect_cfg.get("pedestrian_cross_factor", 0.0))
+    pedestrian_running_percentage = float(collect_cfg.get("pedestrian_running_percentage", 0.0))
+    pedestrian_walk_speed_mps = float(collect_cfg.get("pedestrian_walk_speed_mps", 1.4))
+    pedestrian_run_speed_mps = float(collect_cfg.get("pedestrian_run_speed_mps", 3.0))
 
     carla_client = CarlaClient(
         host=str(sim_cfg.get("host", "127.0.0.1")),
@@ -285,8 +447,29 @@ def collect(config: dict[str, Any], output_root: Path | None = None) -> Path:
     )
     world = carla_client.connect()
     print(
-        "world settings: sync=%s fixed_delta=%s timeout=%.1f fps=%.1f frames=%d"
-        % (synchronous_mode, fixed_delta_seconds if synchronous_mode else None, timeout, fps, frame_count),
+        "world settings: sync=%s fixed_delta=%s timeout=%.1f fps=%.1f frames=%d cmd_lookahead=%s"
+        % (
+            synchronous_mode,
+            fixed_delta_seconds if synchronous_mode else None,
+            timeout,
+            fps,
+            frame_count,
+            _format_route_command_lookahead(
+                route_command_lookahead_mode,
+                route_command_lookahead_frames,
+                route_command_lookahead_meters,
+            ),
+        ),
+        flush=True,
+    )
+    print(
+        "waypoint horizon: mode=%s time_horizon=%.2fs speed_ref=%.2f m/s N=%d"
+        % (
+            waypoint_horizon_mode,
+            waypoint_time_horizon_s,
+            waypoint_speed_reference_mps,
+            N_FUTURE,
+        ),
         flush=True,
     )
     ticks_per_sample = 1
@@ -352,16 +535,46 @@ def collect(config: dict[str, Any], output_root: Path | None = None) -> Path:
                 fixed_route = _build_fixed_route(world, vehicle.get_transform(), route_length, waypoint_spacing_m)
                 tm.set_path(vehicle, [carla.Location(x=wp.transform.location.x, y=wp.transform.location.y, z=wp.transform.location.z) for wp in fixed_route])
             tm.auto_lane_change(vehicle, bool(collect_cfg.get("auto_lane_change", False)))
-            tm.ignore_lights_percentage(vehicle, float(collect_cfg.get("ignore_lights_percentage", 100.0)))
+            tm.ignore_lights_percentage(vehicle, float(collect_cfg.get("ignore_lights_percentage", 0.0)))
             if hasattr(tm, "ignore_signs_percentage"):
-                tm.ignore_signs_percentage(vehicle, float(collect_cfg.get("ignore_signs_percentage", 100.0)))
+                tm.ignore_signs_percentage(vehicle, float(collect_cfg.get("ignore_signs_percentage", 0.0)))
             if hasattr(tm, "ignore_vehicles_percentage"):
-                tm.ignore_vehicles_percentage(vehicle, float(collect_cfg.get("ignore_vehicles_percentage", 100.0)))
+                tm.ignore_vehicles_percentage(vehicle, float(collect_cfg.get("ignore_vehicles_percentage", 0.0)))
             tm.distance_to_leading_vehicle(vehicle, float(collect_cfg.get("distance_to_leading_vehicle_m", 3.0)))
             vehicle.set_autopilot(True, actual_tm_port)
             print(
                 "traffic manager autopilot ON  vehicle=%d  target_speed=%.1f km/h  tm_port=%d  fixed_path=%s"
                 % (int(vehicle.id), target_speed_kmh, actual_tm_port, use_fixed_path),
+                flush=True,
+            )
+            npc_vehicles = _spawn_npc_vehicles(
+                world=world,
+                carla_client=carla_client,
+                traffic_manager=tm,
+                traffic_manager_port=actual_tm_port,
+                count=npc_vehicle_count,
+                vehicle_filter=npc_vehicle_filter,
+                ego_vehicle_id=int(vehicle.id),
+                target_speed_mps=npc_vehicle_target_speed_mps,
+                auto_lane_change=npc_vehicle_auto_lane_change,
+            )
+            walkers = _spawn_walkers(
+                world=world,
+                carla_client=carla_client,
+                count=pedestrian_count,
+                cross_factor=pedestrian_cross_factor,
+                running_percentage=pedestrian_running_percentage,
+                walk_speed_mps=pedestrian_walk_speed_mps,
+                run_speed_mps=pedestrian_run_speed_mps,
+            )
+            print(
+                "traffic actors: npc_vehicles=%d pedestrians=%d ignore_lights=%.1f ignore_vehicles=%.1f"
+                % (
+                    len(npc_vehicles),
+                    len(walkers),
+                    float(collect_cfg.get("ignore_lights_percentage", 0.0)),
+                    float(collect_cfg.get("ignore_vehicles_percentage", 0.0)),
+                ),
                 flush=True,
             )
         else:
@@ -472,21 +685,32 @@ def collect(config: dict[str, Any], output_root: Path | None = None) -> Path:
                     skipped_low_quality += 1
                     continue
                 hist = [raw[i - j * HIST_STEP] for j in range(1, N_HISTORY + 1)]
+                frame_offsets = _waypoint_frame_offsets(
+                    mode=waypoint_horizon_mode,
+                    current_speed_mps=float(f["speed"]),
+                    fps=fps,
+                    time_horizon_s=waypoint_time_horizon_s,
+                    speed_reference_mps=waypoint_speed_reference_mps,
+                    n_future=N_FUTURE,
+                    fixed_step_frames=FUTURE_STEP,
+                )
                 future_wps = []
-                for step in range(1, N_FUTURE + 1):
-                    fut = raw[i + step * FUTURE_STEP]
+                for offset in frame_offsets:
+                    fut = raw[min(len(raw) - 1, i + offset)]
                     dx, dy, dh = _world_to_ego_delta(
                         f["x"], f["y"], f["yaw_rad"],
                         fut["x"], fut["y"], fut["yaw_rad"],
                     )
                     future_wps.append([round(dx, 4), round(dy, 4), round(dh, 5)])
 
-                cmd_idx = min(len(raw) - 1, i + CMD_LOOKAHEAD_FRAMES)
-                _, _, cmd_dh = _world_to_ego_delta(
-                    f["x"], f["y"], f["yaw_rad"],
-                    raw[cmd_idx]["x"], raw[cmd_idx]["y"], raw[cmd_idx]["yaw_rad"],
+                route_command = route_command_from_poses(
+                    raw,
+                    current_index=i,
+                    lookahead_mode=route_command_lookahead_mode,
+                    lookahead_frames=route_command_lookahead_frames,
+                    lookahead_meters=route_command_lookahead_meters,
+                    threshold_rad=route_command_yaw_threshold_rad,
                 )
-                route_command = _command_from_yaw_delta(cmd_dh)
 
                 writer.write({
                     "observation": {
@@ -540,6 +764,7 @@ def collect(config: dict[str, Any], output_root: Path | None = None) -> Path:
                 tm.set_synchronous_mode(False)
         except Exception:
             pass
+        _stop_walker_controllers(carla_client.actors)
         carla_client.cleanup()
         time.sleep(0.5)
 
@@ -563,6 +788,19 @@ def main() -> None:
     parser.add_argument("--driving-stack", choices=["autopilot", "traffic_manager"], default=None)
     parser.add_argument("--synchronous-mode", choices=["true", "false"], default=None)
     parser.add_argument("--fixed-delta-seconds", type=float, default=None)
+    parser.add_argument("--route-command-lookahead-mode", choices=["frames", "meters"], default=None)
+    parser.add_argument("--route-command-lookahead-frames", type=int, default=None)
+    parser.add_argument("--route-command-lookahead-meters", type=float, default=None)
+    parser.add_argument("--route-command-yaw-threshold-rad", type=float, default=None)
+    parser.add_argument("--ignore-lights-percentage", type=float, default=None)
+    parser.add_argument("--ignore-signs-percentage", type=float, default=None)
+    parser.add_argument("--ignore-vehicles-percentage", type=float, default=None)
+    parser.add_argument("--npc-vehicle-count", type=int, default=None)
+    parser.add_argument("--npc-vehicle-filter", type=str, default=None)
+    parser.add_argument("--npc-vehicle-target-speed-mps", type=float, default=None)
+    parser.add_argument("--pedestrian-count", type=int, default=None)
+    parser.add_argument("--pedestrian-cross-factor", type=float, default=None)
+    parser.add_argument("--pedestrian-running-percentage", type=float, default=None)
     args = parser.parse_args()
 
     config = _load_config(args.config)
@@ -600,6 +838,32 @@ def _apply_cli_overrides(config: dict[str, Any], args: argparse.Namespace) -> No
         random.seed(args.spawn_seed)
     if args.driving_stack is not None:
         collect_cfg["driving_stack"] = _normalize_driving_stack(args.driving_stack)
+    if args.route_command_lookahead_mode is not None:
+        collect_cfg["route_command_lookahead_mode"] = args.route_command_lookahead_mode
+    if args.route_command_lookahead_frames is not None:
+        collect_cfg["route_command_lookahead_frames"] = args.route_command_lookahead_frames
+    if args.route_command_lookahead_meters is not None:
+        collect_cfg["route_command_lookahead_meters"] = args.route_command_lookahead_meters
+    if args.route_command_yaw_threshold_rad is not None:
+        collect_cfg["route_command_yaw_threshold_rad"] = args.route_command_yaw_threshold_rad
+    if args.ignore_lights_percentage is not None:
+        collect_cfg["ignore_lights_percentage"] = args.ignore_lights_percentage
+    if args.ignore_signs_percentage is not None:
+        collect_cfg["ignore_signs_percentage"] = args.ignore_signs_percentage
+    if args.ignore_vehicles_percentage is not None:
+        collect_cfg["ignore_vehicles_percentage"] = args.ignore_vehicles_percentage
+    if args.npc_vehicle_count is not None:
+        collect_cfg["npc_vehicle_count"] = args.npc_vehicle_count
+    if args.npc_vehicle_filter is not None:
+        collect_cfg["npc_vehicle_filter"] = args.npc_vehicle_filter
+    if args.npc_vehicle_target_speed_mps is not None:
+        collect_cfg["npc_vehicle_target_speed_mps"] = args.npc_vehicle_target_speed_mps
+    if args.pedestrian_count is not None:
+        collect_cfg["pedestrian_count"] = args.pedestrian_count
+    if args.pedestrian_cross_factor is not None:
+        collect_cfg["pedestrian_cross_factor"] = args.pedestrian_cross_factor
+    if args.pedestrian_running_percentage is not None:
+        collect_cfg["pedestrian_running_percentage"] = args.pedestrian_running_percentage
 
 
 def _normalize_driving_stack(value: str) -> str:
@@ -607,6 +871,12 @@ def _normalize_driving_stack(value: str) -> str:
     if normalized == "autopilot":
         return "traffic_manager"
     return normalized
+
+
+def _format_route_command_lookahead(mode: str, frames: int, meters: float) -> str:
+    if mode == "frames":
+        return "%d frames" % frames
+    return "%.2f m" % meters
 
 
 if __name__ == "__main__":

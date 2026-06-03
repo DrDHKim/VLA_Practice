@@ -12,10 +12,23 @@ IMAGE_WIDTH="${IMAGE_WIDTH:-320}"
 IMAGE_HEIGHT="${IMAGE_HEIGHT:-180}"
 TARGET_SPEED_MPS="${TARGET_SPEED_MPS:-5.0}"
 SPEED_CONTROL="${SPEED_CONTROL:-percentage}"
+IGNORE_LIGHTS_PERCENTAGE="${IGNORE_LIGHTS_PERCENTAGE:-0.0}"
+IGNORE_SIGNS_PERCENTAGE="${IGNORE_SIGNS_PERCENTAGE:-0.0}"
+IGNORE_VEHICLES_PERCENTAGE="${IGNORE_VEHICLES_PERCENTAGE:-0.0}"
+NPC_VEHICLE_COUNT="${NPC_VEHICLE_COUNT:-20}"
+NPC_VEHICLE_FILTER="${NPC_VEHICLE_FILTER:-vehicle.tesla.model3}"
+NPC_VEHICLE_TARGET_SPEED_MPS="${NPC_VEHICLE_TARGET_SPEED_MPS:-4.0}"
+PEDESTRIAN_COUNT="${PEDESTRIAN_COUNT:-30}"
+PEDESTRIAN_CROSS_FACTOR="${PEDESTRIAN_CROSS_FACTOR:-0.7}"
+PEDESTRIAN_RUNNING_PERCENTAGE="${PEDESTRIAN_RUNNING_PERCENTAGE:-0.1}"
 SYNCHRONOUS_MODE="${SYNCHRONOUS_MODE:-true}"
 FIXED_DELTA_SECONDS="${FIXED_DELTA_SECONDS:-0.05}"
 ROUTE_LENGTH="${ROUTE_LENGTH:-120}"
 CONTROL_MODE="${CONTROL_MODE:-autopilot}"
+ROUTE_COMMAND_LOOKAHEAD_MODE="${ROUTE_COMMAND_LOOKAHEAD_MODE:-meters}"
+ROUTE_COMMAND_LOOKAHEAD_METERS="${ROUTE_COMMAND_LOOKAHEAD_METERS:-30.0}"
+ROUTE_COMMAND_LOOKAHEAD_FRAMES="${ROUTE_COMMAND_LOOKAHEAD_FRAMES:-20}"
+ROUTE_COMMAND_YAW_THRESHOLD_RAD="${ROUTE_COMMAND_YAW_THRESHOLD_RAD:-0.35}"
 TOWN="${TOWN:-Town01}"
 WEATHER="${WEATHER:-ClearNoon}"
 SPAWN_SEED_BASE="${SPAWN_SEED_BASE:-2601}"
@@ -25,7 +38,7 @@ WAIT_FOR_CARLA_SECONDS="${WAIT_FOR_CARLA_SECONDS:-420}"
 CARLA_INTERNAL_WAIT_SECONDS="${CARLA_INTERNAL_WAIT_SECONDS:-300}"
 SCENE_RETRY_COUNT="${SCENE_RETRY_COUNT:-2}"
 SCENE_RETRY_SLEEP_SECONDS="${SCENE_RETRY_SLEEP_SECONDS:-20}"
-OVERWRITE_SCENE_DIRS="${OVERWRITE_SCENE_DIRS:-1}"
+OVERWRITE_SCENE_DIRS="${OVERWRITE_SCENE_DIRS:-0}"
 PYTHON_BIN="${PYTHON_BIN:-.conda/bin/python}"
 GIF_FPS="${GIF_FPS:-10}"
 GIF_STRIDE="${GIF_STRIDE:-2}"
@@ -44,6 +57,8 @@ mkdir -p "$OUTPUT_ROOT"
 COMBINED_METADATA="$OUTPUT_ROOT/metadata.jsonl"
 SUMMARY_PATH="$OUTPUT_ROOT/collection_summary.json"
 : > "$COMBINED_METADATA"
+COLLECTED_SCENE_COUNT=0
+SKIPPED_SCENE_COUNT=0
 
 echo "Waiting for CARLA server: $CARLA_HOST:$CARLA_PORT"
 deadline=$((SECONDS + WAIT_FOR_CARLA_SECONDS))
@@ -69,7 +84,10 @@ echo "IMAGE             : ${IMAGE_WIDTH}x${IMAGE_HEIGHT}"
 echo "TOWN/WEATHER      : $TOWN / $WEATHER"
 echo "CONTROL_MODE      : $CONTROL_MODE"
 echo "SPEED_CONTROL     : $SPEED_CONTROL"
+echo "IGNORE L/S/V      : $IGNORE_LIGHTS_PERCENTAGE / $IGNORE_SIGNS_PERCENTAGE / $IGNORE_VEHICLES_PERCENTAGE"
+echo "NPC VEH/PED       : $NPC_VEHICLE_COUNT ($NPC_VEHICLE_FILTER) / $PEDESTRIAN_COUNT"
 echo "SYNC/FIXED_DT     : $SYNCHRONOUS_MODE / $FIXED_DELTA_SECONDS"
+echo "CMD_LOOKAHEAD     : $ROUTE_COMMAND_LOOKAHEAD_MODE meters=$ROUTE_COMMAND_LOOKAHEAD_METERS frames=$ROUTE_COMMAND_LOOKAHEAD_FRAMES"
 echo
 
 for scene_index in $(seq 0 $((SCENE_COUNT - 1))); do
@@ -82,9 +100,14 @@ for scene_index in $(seq 0 $((SCENE_COUNT - 1))); do
     if [[ "$OVERWRITE_SCENE_DIRS" == "1" ]]; then
       rm -rf "$scene_root"
     else
-      echo "scene directory already exists: $scene_root" >&2
-      echo "Set OVERWRITE_SCENE_DIRS=1 or choose a new OUTPUT_ROOT." >&2
-      exit 1
+      if [[ -s "$scene_root/metadata.jsonl" ]]; then
+        echo "$scene_name already exists; reusing metadata and skipping collection."
+        cat "$scene_root/metadata.jsonl" >> "$COMBINED_METADATA"
+        SKIPPED_SCENE_COUNT=$((SKIPPED_SCENE_COUNT + 1))
+        continue
+      fi
+      echo "$scene_name exists but metadata is missing or empty; replacing incomplete output."
+      rm -rf "$scene_root"
     fi
   fi
 
@@ -101,10 +124,23 @@ for scene_index in $(seq 0 $((SCENE_COUNT - 1))); do
       --image-height "$IMAGE_HEIGHT" \
       --target-speed-mps "$TARGET_SPEED_MPS" \
       --speed-control "$SPEED_CONTROL" \
+      --ignore-lights-percentage "$IGNORE_LIGHTS_PERCENTAGE" \
+      --ignore-signs-percentage "$IGNORE_SIGNS_PERCENTAGE" \
+      --ignore-vehicles-percentage "$IGNORE_VEHICLES_PERCENTAGE" \
+      --npc-vehicle-count "$NPC_VEHICLE_COUNT" \
+      --npc-vehicle-filter "$NPC_VEHICLE_FILTER" \
+      --npc-vehicle-target-speed-mps "$NPC_VEHICLE_TARGET_SPEED_MPS" \
+      --pedestrian-count "$PEDESTRIAN_COUNT" \
+      --pedestrian-cross-factor "$PEDESTRIAN_CROSS_FACTOR" \
+      --pedestrian-running-percentage "$PEDESTRIAN_RUNNING_PERCENTAGE" \
       --synchronous-mode "$SYNCHRONOUS_MODE" \
       --fixed-delta-seconds "$FIXED_DELTA_SECONDS" \
       --route-length "$ROUTE_LENGTH" \
       --driving-stack "$CONTROL_MODE" \
+      --route-command-lookahead-mode "$ROUTE_COMMAND_LOOKAHEAD_MODE" \
+      --route-command-lookahead-meters "$ROUTE_COMMAND_LOOKAHEAD_METERS" \
+      --route-command-lookahead-frames "$ROUTE_COMMAND_LOOKAHEAD_FRAMES" \
+      --route-command-yaw-threshold-rad "$ROUTE_COMMAND_YAW_THRESHOLD_RAD" \
       --town "$TOWN" \
       --weather "$WEATHER" \
       --spawn-seed "$seed"; then
@@ -131,6 +167,7 @@ for scene_index in $(seq 0 $((SCENE_COUNT - 1))); do
     exit 1
   fi
   cat "$scene_root/metadata.jsonl" >> "$COMBINED_METADATA"
+  COLLECTED_SCENE_COUNT=$((COLLECTED_SCENE_COUNT + 1))
 
   echo "Rendering GIF for $scene_name ..."
   "$PYTHON_BIN" scripts/render_scene_gif.py \
@@ -152,14 +189,29 @@ cat > "$SUMMARY_PATH" <<EOF
   "output_root": "$OUTPUT_ROOT",
   "metadata_path": "$COMBINED_METADATA",
   "scene_count": $SCENE_COUNT,
+  "collected_scene_count": $COLLECTED_SCENE_COUNT,
+  "skipped_scene_count": $SKIPPED_SCENE_COUNT,
   "seconds_per_scene": $SECONDS_PER_SCENE,
   "fps": $FPS,
   "image_width": $IMAGE_WIDTH,
   "image_height": $IMAGE_HEIGHT,
   "target_speed_mps": $TARGET_SPEED_MPS,
   "speed_control": "$SPEED_CONTROL",
+  "ignore_lights_percentage": $IGNORE_LIGHTS_PERCENTAGE,
+  "ignore_signs_percentage": $IGNORE_SIGNS_PERCENTAGE,
+  "ignore_vehicles_percentage": $IGNORE_VEHICLES_PERCENTAGE,
+  "npc_vehicle_count": $NPC_VEHICLE_COUNT,
+  "npc_vehicle_filter": "$NPC_VEHICLE_FILTER",
+  "npc_vehicle_target_speed_mps": $NPC_VEHICLE_TARGET_SPEED_MPS,
+  "pedestrian_count": $PEDESTRIAN_COUNT,
+  "pedestrian_cross_factor": $PEDESTRIAN_CROSS_FACTOR,
+  "pedestrian_running_percentage": $PEDESTRIAN_RUNNING_PERCENTAGE,
   "synchronous_mode": "$SYNCHRONOUS_MODE",
   "fixed_delta_seconds": $FIXED_DELTA_SECONDS,
+  "route_command_lookahead_mode": "$ROUTE_COMMAND_LOOKAHEAD_MODE",
+  "route_command_lookahead_meters": $ROUTE_COMMAND_LOOKAHEAD_METERS,
+  "route_command_lookahead_frames": $ROUTE_COMMAND_LOOKAHEAD_FRAMES,
+  "route_command_yaw_threshold_rad": $ROUTE_COMMAND_YAW_THRESHOLD_RAD,
   "route_length": $ROUTE_LENGTH,
   "town": "$TOWN",
   "weather": "$WEATHER",

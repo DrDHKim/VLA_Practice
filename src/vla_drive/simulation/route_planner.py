@@ -4,6 +4,8 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
+from vla_drive.simulation.route_command import RouteCommandLookaheadMode, route_command_from_poses
+
 
 @dataclass(frozen=True)
 class RouteWaypoint:
@@ -21,11 +23,19 @@ class RoutePlanner:
         route_length: int = 40,
         waypoint_spacing_m: float = 2.0,
         lookahead_count: int = 8,
+        command_lookahead_mode: RouteCommandLookaheadMode = "meters",
+        command_lookahead_meters: float = 30.0,
+        command_lookahead_frames: int = 20,
+        command_yaw_threshold_rad: float = 0.35,
     ) -> None:
         self.world = world
         self.route_length = int(route_length)
         self.waypoint_spacing_m = float(waypoint_spacing_m)
         self.lookahead_count = int(lookahead_count)
+        self.command_lookahead_mode = command_lookahead_mode
+        self.command_lookahead_meters = float(command_lookahead_meters)
+        self.command_lookahead_frames = int(command_lookahead_frames)
+        self.command_yaw_threshold_rad = float(command_yaw_threshold_rad)
         self._route: list[Any] = []
         self._cursor = 0
 
@@ -59,17 +69,14 @@ class RoutePlanner:
         self._cursor = best_idx
 
     def next_command(self) -> str:
-        if len(self._route) < 3 or self._cursor >= len(self._route) - 2:
-            return "lane_follow"
-
-        yaw0 = math.radians(self._route[self._cursor].transform.rotation.yaw)
-        yaw1 = math.radians(self._route[min(len(self._route) - 1, self._cursor + 2)].transform.rotation.yaw)
-        delta = math.atan2(math.sin(yaw1 - yaw0), math.cos(yaw1 - yaw0))
-        if delta > 0.35:
-            return "turn_left"
-        if delta < -0.35:
-            return "turn_right"
-        return "lane_follow"
+        return route_command_from_poses(
+            self._route,
+            current_index=self._cursor,
+            lookahead_mode=self.command_lookahead_mode,
+            lookahead_frames=self.command_lookahead_frames,
+            lookahead_meters=self.command_lookahead_meters,
+            threshold_rad=self.command_yaw_threshold_rad,
+        )
 
     def local_waypoints(self, vehicle_transform: Any, count: int | None = None) -> list[list[float]]:
         count = int(count or self.lookahead_count)

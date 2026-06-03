@@ -25,6 +25,9 @@
 - 큰 rewrite보다 작고 검증 가능한 변경을 우선한다.
 - 금지 규칙을 만나면 멈추지 말고 문서에 적힌 대안을 사용한다.
 - 코드, 스크립트, 설정, 문서, 실험 결과 등 변경내용이 발생하면 `docs/research_journal.md`에 날짜와 함께 기록한다.
+- CARLA multi-scene 수집에서 기존 scene에 `metadata.jsonl`이 있으면 완료된 것으로 보고 skip한다. scene directory만 있고 metadata가 없거나 비어 있으면 incomplete로 보고 해당 scene만 자동 재수집한다.
+- commit을 만들기 전에는 변경 내용을 상세히 담은 commit message를 먼저 제안하고 사용자 승인을 받은 뒤 `git commit`을 실행한다.
+- commit message를 제안하기 전에는 staged diff 전체를 확인하고, 주요 기능 변경/설정 변경/검증 추가가 빠지지 않게 반영한다.
 
 ## 코드 규칙
 

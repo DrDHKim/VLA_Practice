@@ -35,7 +35,7 @@
 - 세부 목록과 용량 정책은 `docs/setup.md`를 기준으로 확인할 것.
 - 현재 MacBook readiness에서 CARLA server runtime은 준비됐지만, macOS native `carla` PythonAPI와 MPS availability는 주의 대상이다. 자세한 해결책은 `docs/setup.md`와 `docs/carla_mac_setup.md`를 따른다.
 
-다음 구현 대상: `M1: CARLA Connection`
+현재 구현 대상: `M10D: Autopilot Sync Dataset Collection and Validation`
 
 ## M1: CARLA Connection
 
@@ -124,7 +124,7 @@
 단계:
 
 1. 먼저 dummy backbone으로 `VLADrivingPolicy` forward path를 통과시킨다.
-2. `WaypointHead`가 `[B, T, 2]`를 출력하는지 확인한다.
+2. `WaypointHead`가 `[B, T, 3]`을 출력하는지 확인한다.
 3. `VLADrivingPolicy`가 backbone output과 waypoint head를 연결하게 한다.
 4. waypoint L1 loss와 FDE loss를 합친 loss 함수를 만든다.
 5. Qwen2.5-VL 또는 LLaVA wrapper는 dummy baseline이 통과한 뒤 붙인다.
@@ -207,7 +207,7 @@
 
 목표:
 
-- CARLA route에서 collision, route completion, infraction penalty, driving score를 측정한다.
+- CARLA route에서 Traffic Manager autopilot baseline의 collision, route completion, infraction penalty, driving score를 측정한다.
 
 단계:
 
@@ -249,8 +249,6 @@
 - `[x]` 실험 결과가 `outputs/reports/`에 저장된다.
 - `[x]` fast/slow reasoning mode의 최소 smoke 비교를 추가한다.
 
-다음 구현 대상: `M8: MacBook Scale Envelope`
-
 ## M8: MacBook Scale Envelope
 
 상태: `[x]`
@@ -281,8 +279,6 @@
 - `outputs/reports/mac_scale_envelope.json`에 성공한 최대 설정과 실패한 최소 설정이 저장된다.
 - 5090 전환이 필요하면 `docs/experiments.md`의 장비 전환 기록 양식이 채워진다.
 - 전환이 아직 필요 없으면 다음 MacBook 실험 범위가 명확히 적힌다.
-
-다음 구현 대상: `M9: Dataset Expansion on Mac`
 
 ## M9: Dataset Expansion on Mac
 
@@ -444,7 +440,61 @@
 
 - PID 관련 code/test/launcher 참조가 제거된다.
 - autopilot-only 8초 smoke 수집에서 RGB image와 metadata가 생성된다.
-- brake 반복이 사라진 smoke report가 생성된다.
+- sync smoke에서 비동기 stop-go 문제가 완화되고, 남은 Traffic Manager throttle/brake 변동은 scene report에 드러난다.
+
+## M10D: Autopilot Sync Dataset Collection and Validation
+
+상태: `[~]`
+
+파일:
+
+- `launchers/06_데이터수집.command`
+- `scripts/collect_carla_scenes.sh`
+- `scripts/render_scene_gif.py`
+- `scripts/render_scene_report.py`
+- `src/vla_drive/simulation/route_command.py`
+- `src/vla_drive/simulation/route_planner.py`
+- `src/vla_drive/configs/carla_mac_dataset.yaml`
+- `src/vla_drive/configs/carla_rgb_waypoint.yaml`
+- `tests/unit/test_route_command.py`
+- `scripts/train_lora.sh`
+- `scripts/eval_open_loop.sh`
+- `scripts/eval_carla.sh`
+- `docs/experiments.md`
+- `docs/research_journal.md`
+
+목표:
+
+- M10C에서 정리한 Traffic Manager autopilot + synchronous sampling 경로로 MacBook CARLA dataset을 새로 수집한다.
+- 신호등 정지, 앞차 정지, random walker crossing에 따른 감속/정지 샘플을 포함한다.
+- 신호등/보행자 상태는 모델 입력에 직접 넣지 않고, RGB image와 autopilot target에서 학습하게 둔다.
+- 수집 품질을 GIF, BEV/control report, metadata 통계로 먼저 검수한 뒤 training/evaluation으로 넘어간다.
+- MacBook에서 더 진행할 수 있는 범위와 RTX 5090으로 넘겨야 하는 범위를 분리한다.
+
+단계:
+
+1. `[x]` `06_데이터수집.command` 상단 변수로 scene 수, 초, FPS, 해상도, overwrite 정책을 확인한다.
+2. `[x]` route command 생성 로직을 수집/평가에서 공유 가능한 helper로 분리한다.
+3. `[x]` route command lookahead를 `meters` 또는 `frames` 입력으로 조정할 수 있게 한다. 기본값은 30m다.
+4. `[x]` Traffic Manager가 신호등/앞차를 따르도록 ignore lights/signs/vehicles 기본값을 0으로 바꾼다.
+5. `[x]` NPC vehicle과 random walker crossing 수를 launcher/config에서 조정할 수 있게 한다.
+6. `[ ]` 수집 결과의 `metadata.jsonl`, scene별 `scene.gif`, `bev_route.png`, `controls_timeseries.png`가 생성되는지 확인한다.
+7. `[ ]` metadata row 수, sample id 중복, frame index gap, image path 존재 여부를 점검한다.
+8. `[ ]` 속도/브레이크가 과도하게 흔들리는 scene은 제외하거나 재수집한다.
+9. `[ ]` 수집 metadata로 DataLoader/pytest smoke를 통과시킨다.
+10. `[ ]` `reasoning_aux`와 `action_token` tiny training smoke를 실행한다.
+11. `[ ]` 각 checkpoint를 같은 metadata로 open-loop 평가한다.
+12. `[ ]` CARLA Traffic Manager closed-loop baseline report를 생성한다.
+13. `[ ]` 결과와 다음 장비 전환 판단을 `docs/research_journal.md`와 `docs/experiments.md`에 기록한다.
+
+완료 기준:
+
+- combined `metadata.jsonl`이 있고, scene별 GIF/report를 통해 수집 품질을 검수했다.
+- 학습 수집과 평가에서 같은 route command lookahead 기준을 설정할 수 있다. 기본 설정은 30m다.
+- 신호등/앞차/NPC 보행자 시나리오를 화면 기반으로 수집할 수 있다.
+- DataLoader smoke와 최소 1개 training stage가 통과한다.
+- open-loop report와 Traffic Manager baseline closed-loop report가 `outputs/reports/`에 저장된다.
+- MacBook에서 추가 수집/학습을 계속할지, RTX 5090으로 확장할지 근거가 문서화된다.
 
 ## M11: RTX 5090 Expansion
 
