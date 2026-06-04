@@ -9,6 +9,7 @@ PYTHONIOENCODING=utf-8 "$WINE_BIN" --bottle "$BOTTLE" --cx-app 'C:\Python37\pyth
   scripts/eval_carla_closed_loop.py \
   --host "${CARLA_HOST:-127.0.0.1}" \
   --port "${CARLA_PORT:-2000}" \
+  --timeout "${CARLA_TIMEOUT_SECONDS:-30.0}" \
   --town "${CARLA_TOWN:-Town01}" \
   --weather "${CARLA_WEATHER:-ClearNoon}" \
   --route-count "${ROUTE_COUNT:-5}" \

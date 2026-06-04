@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 import torch
 
+from vla_drive.models.backbone_vlm import DummyDrivingBackbone
 from vla_drive.models.vla_policy import build_dummy_policy
 from vla_drive.training.losses import waypoint_prediction_loss
 
@@ -25,6 +26,20 @@ def test_dummy_vla_policy_forward_loss_backward() -> None:
     loss.backward()
     assert loss.item() >= 0.0
     assert any(param.grad is not None for param in policy.parameters())
+
+
+def test_dummy_backbone_is_route_command_conditioned() -> None:
+    backbone = DummyDrivingBackbone(hidden_dim=16)
+    batch = {
+        "images": torch.zeros(2, 3, 32, 32),
+        "ego_speed_mps": torch.tensor([3.0, 3.0]),
+        "route_commands": ["lane_follow", "turn_left"],
+    }
+
+    hidden = backbone.encode(batch)
+
+    assert hidden.shape == (2, 16)
+    assert not torch.allclose(hidden[0], hidden[1])
 
 
 @pytest.mark.slow

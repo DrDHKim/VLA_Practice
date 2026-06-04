@@ -93,6 +93,18 @@ reason_next_machine_required:
 - goal: MacBook에서 성공 가능한 최대 설정과 실패하는 최소 설정을 찾음
 - metric: max successful route seconds/count, max image size, max samples, training time, open-loop ADE/FDE, closed-loop score
 
+2026-06-04 M10D final MacBook result:
+
+| Policy | Data | Train result | Open-loop | CARLA closed-loop |
+| --- | --- | --- | --- | --- |
+| command-conditioned `reasoning_aux` | 100 scenes, 10,000 balanced samples | best epoch loss 1.7789 | ADE 1.4648, FDE 3.1421 | learned 1 route x 8s: route completion 0.13%, driving score 0.13%, collisions 0 |
+
+Interpretation:
+
+- The launcher-based training/open-loop/learned closed-loop path now runs on MacBook.
+- The learned policy collapses to `slow_or_stop` at closed-loop start and does not drive away from spawn.
+- Before scaling to RTX 5090, prioritize data/model fixes for stop-start behavior or a direct control/action head; larger hardware alone is not the next bottleneck for this failure mode.
+
 ### E07 5090 Handoff Smoke
 
 - model: E06에서 선택한 best small variant

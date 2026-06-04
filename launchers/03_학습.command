@@ -12,46 +12,46 @@ set -euo pipefail
 # - action_token: trajectory token baseline
 # - frozen_vlm: Qwen2.5-VL-3B frozen backbone + waypoint head
 # - lora_vlm: Qwen2.5-VL-3B LoRA + waypoint head
-STAGE=reasoning_aux
-METADATA_PATH=/Volumes/DATASET/vla_drive_carla/mac_scenes/metadata.jsonl
-CHECKPOINT_DIR=checkpoints/mac_vla
-LOG_DIR=outputs/logs/mac_vla
+STAGE="${STAGE:-reasoning_aux}"
+METADATA_PATH="${METADATA_PATH:-tmp/m10d_final/metadata_scene_balanced_100.jsonl}"
+CHECKPOINT_DIR="${CHECKPOINT_DIR:-checkpoints/m10d_final_reasoning_aux_balanced}"
+LOG_DIR="${LOG_DIR:-outputs/logs/m10d_final_reasoning_aux_balanced}"
 
-DEVICE=auto
-EPOCHS=30
-BATCH_SIZE=8
-IMAGE_SIZE=64
-MAX_SAMPLES=300
-NUM_WORKERS=0
-LR=1e-3
-WEIGHT_DECAY=0.0
-GRAD_ACCUM_STEPS=1
-MAX_GRAD_NORM=1.0
-L1_WEIGHT=1.0
-FDE_WEIGHT=1.0
-LOG_EVERY=5
+DEVICE="${DEVICE:-auto}"
+EPOCHS="${EPOCHS:-3}"
+BATCH_SIZE="${BATCH_SIZE:-32}"
+IMAGE_SIZE="${IMAGE_SIZE:-64}"
+MAX_SAMPLES="${MAX_SAMPLES:-10000}"
+NUM_WORKERS="${NUM_WORKERS:-0}"
+LR="${LR:-1e-3}"
+WEIGHT_DECAY="${WEIGHT_DECAY:-0.0}"
+GRAD_ACCUM_STEPS="${GRAD_ACCUM_STEPS:-1}"
+MAX_GRAD_NORM="${MAX_GRAD_NORM:-1.0}"
+L1_WEIGHT="${L1_WEIGHT:-1.0}"
+FDE_WEIGHT="${FDE_WEIGHT:-1.0}"
+LOG_EVERY="${LOG_EVERY:-50}"
 
 # Early stopping. 빈 값이면 비활성화.
-EARLY_STOP_PATIENCE=5
-EARLY_STOP_MIN_DELTA=0.001
-EARLY_STOP_MIN_EPOCHS=5
+EARLY_STOP_PATIENCE="${EARLY_STOP_PATIENCE:-}"
+EARLY_STOP_MIN_DELTA="${EARLY_STOP_MIN_DELTA:-0.001}"
+EARLY_STOP_MIN_EPOCHS="${EARLY_STOP_MIN_EPOCHS:-5}"
 
-REASONING_MODE=fast
-REASONING_LOSS_WEIGHT=0.1
+REASONING_MODE="${REASONING_MODE:-fast}"
+REASONING_LOSS_WEIGHT="${REASONING_LOSS_WEIGHT:-0.1}"
 
 # Action-token stage 파라미터
-NUM_ACTION_TOKENS=64
-TOKENIZER_PATH=
+NUM_ACTION_TOKENS="${NUM_ACTION_TOKENS:-64}"
+TOKENIZER_PATH="${TOKENIZER_PATH:-}"
 
 # Full VLM 연결 파라미터 (frozen_vlm / lora_vlm 사용 시)
 # Mac에서는 frozen_vlm을 먼저 쓰고, lora_vlm은 rank를 낮게 시작한다.
-MODEL_PATH=data/offline/hf_models/Qwen2.5-VL-3B-Instruct
-LORA_RANK=2
-LORA_ALPHA=4
+MODEL_PATH="${MODEL_PATH:-data/offline/hf_models/Qwen2.5-VL-3B-Instruct}"
+LORA_RANK="${LORA_RANK:-2}"
+LORA_ALPHA="${LORA_ALPHA:-4}"
 
 # 이어 학습할 때만 경로를 넣는다.
 # 예: RESUME_FROM=checkpoints/m4_dummy/latest.pt
-RESUME_FROM=
+RESUME_FROM="${RESUME_FROM:-}"
 
 # ============================================================
 # 여기 아래는 보통 수정하지 않는다.

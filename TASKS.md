@@ -478,14 +478,14 @@
 3. `[x]` route command lookahead를 `meters` 또는 `frames` 입력으로 조정할 수 있게 한다. 기본값은 30m다.
 4. `[x]` Traffic Manager가 신호등/앞차를 따르도록 ignore lights/signs/vehicles 기본값을 0으로 바꾼다.
 5. `[x]` NPC vehicle과 random walker crossing 수를 launcher/config에서 조정할 수 있게 한다.
-6. `[ ]` 수집 결과의 `metadata.jsonl`, scene별 `scene.gif`, `bev_route.png`, `controls_timeseries.png`가 생성되는지 확인한다.
-7. `[ ]` metadata row 수, sample id 중복, frame index gap, image path 존재 여부를 점검한다.
+6. `[x]` 수집 결과의 `metadata.jsonl`, scene별 `scene.gif`, `bev_route.png`, `controls_timeseries.png`가 생성되는지 확인한다.
+7. `[x]` metadata row 수, sample id 중복, frame index gap, image path 존재 여부를 점검한다.
 8. `[ ]` 속도/브레이크가 과도하게 흔들리는 scene은 제외하거나 재수집한다.
-9. `[ ]` 수집 metadata로 DataLoader/pytest smoke를 통과시킨다.
-10. `[ ]` `reasoning_aux`와 `action_token` tiny training smoke를 실행한다.
-11. `[ ]` 각 checkpoint를 같은 metadata로 open-loop 평가한다.
-12. `[ ]` CARLA Traffic Manager closed-loop baseline report를 생성한다.
-13. `[ ]` 결과와 다음 장비 전환 판단을 `docs/research_journal.md`와 `docs/experiments.md`에 기록한다.
+9. `[x]` 수집 metadata로 DataLoader/pytest smoke를 통과시킨다.
+10. `[x]` `reasoning_aux`와 `action_token` tiny training smoke를 실행한다.
+11. `[x]` 각 checkpoint를 같은 metadata로 open-loop 평가한다.
+12. `[x]` CARLA Traffic Manager closed-loop baseline report를 생성한다.
+13. `[x]` 결과와 다음 장비 전환 판단을 `docs/research_journal.md`와 `docs/experiments.md`에 기록한다.
 
 완료 기준:
 

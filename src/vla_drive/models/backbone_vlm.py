@@ -123,7 +123,18 @@ class DummyDrivingBackbone(nn.Module):
 
     Accepts [B, NUM_CAMERAS, NUM_FRAMES, C, H, W] or legacy [B, C, H, W].
     Front-camera current frame is used; remaining views/frames are ignored.
+    Route command is injected as a compact one-hot feature so Mac-scale
+    training remains command-conditioned without loading a full VLM backbone.
     """
+
+    COMMAND_TO_INDEX = {
+        "lane_follow": 0,
+        "keep_lane": 0,
+        "turn_left": 1,
+        "left": 1,
+        "turn_right": 2,
+        "right": 2,
+    }
 
     def __init__(self, hidden_dim: int = 64) -> None:
         super().__init__()
@@ -137,7 +148,7 @@ class DummyDrivingBackbone(nn.Module):
             nn.Flatten(),
         )
         self.proj = nn.Sequential(
-            nn.Linear(33, hidden_dim),
+            nn.Linear(36, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.GELU(),
         )
@@ -151,5 +162,23 @@ class DummyDrivingBackbone(nn.Module):
         if speed is None:
             speed = torch.zeros(images.shape[0], device=images.device, dtype=images.dtype)
         speed = speed.to(device=images.device, dtype=images.dtype).view(images.shape[0], 1)
+        route_features = self._route_command_features(batch, images.shape[0], images.device, images.dtype)
         image_features = self.image_encoder(images)
-        return self.proj(torch.cat([image_features, speed], dim=1))
+        return self.proj(torch.cat([image_features, speed, route_features], dim=1))
+
+    def _route_command_features(
+        self,
+        batch: dict,
+        batch_size: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> torch.Tensor:
+        route_commands = batch.get("route_commands")
+        features = torch.zeros(batch_size, 3, device=device, dtype=dtype)
+        if route_commands is None:
+            return features
+        for row_idx, command in enumerate(route_commands[:batch_size]):
+            command_idx = self.COMMAND_TO_INDEX.get(str(command))
+            if command_idx is not None:
+                features[row_idx, command_idx] = 1.0
+        return features

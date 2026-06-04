@@ -1491,3 +1491,462 @@ pedestrian_running_percentage = 0.1
 ```bash
 open launchers/06_데이터수집.command
 ```
+
+## 2026-06-03: M10D 현재 수집분 DataLoader/training/open-loop smoke
+
+사용자가 100-scene 수집을 계속 진행하는 동안, 현재까지 쌓인 `/Volumes/DATASET/vla_drive_carla/mac_scenes/metadata.jsonl`로 다음 단계를 먼저 검증했다.
+
+수집 artifact 확인:
+
+- combined `metadata.jsonl` 존재.
+- `scene_000`부터 `scene_029`까지 scene별 `metadata.jsonl`, `scene.gif`, `bev_route.png`, `controls_timeseries.png`가 생성된 것을 확인했다.
+- 검사 시점 metadata는 수집이 계속 진행 중이라 16,050 rows에서 DataLoader smoke 시점 21,935 rows로 증가했다.
+
+metadata 품질 점검:
+
+```text
+rows=16050
+scenes=30
+rows_per_scene=535
+duplicate_sample_id=0
+missing_camera_paths=0
+frame_gap_counts={1: 16020}
+route_command_pct={lane_follow: 70.0, turn_left: 16.6, turn_right: 13.4}
+speed_lt_0.5_mps=26.6%
+brake_gt_0.2=31.2%
+```
+
+판단:
+
+- tiny/smoke 학습에는 충분하다.
+- 정지/감속 샘플은 들어왔지만 `max_speed=14.6267m/s`, brake-heavy sample 비율이 있으므로 과속/브레이크 과다 scene 제외 여부는 별도 검수로 남긴다.
+
+검증:
+
+```bash
+MPLCONFIGDIR=.matplotlib_cache .conda/bin/python -m pytest tests/unit/test_data_m2.py tests/unit/test_route_command.py
+```
+
+결과:
+
+```text
+5 passed
+```
+
+DataLoader smoke:
+
+```text
+dataset_len=21935
+batch_images=(2, 3, 4, 3, 128, 128)
+batch_waypoints=(2, 10, 3)
+```
+
+Training smoke:
+
+```bash
+STAGE=reasoning_aux METADATA_PATH=/Volumes/DATASET/vla_drive_carla/mac_scenes/metadata.jsonl CHECKPOINT_DIR=checkpoints/m10d_reasoning_aux_smoke LOG_DIR=outputs/logs/m10d_reasoning_aux_smoke EPOCHS=3 MAX_SAMPLES=300 BATCH_SIZE=8 IMAGE_SIZE=64 DEVICE=auto LOG_EVERY=10 EARLY_STOP_PATIENCE= NUM_ACTION_TOKENS=64 scripts/train_lora.sh
+STAGE=action_token METADATA_PATH=/Volumes/DATASET/vla_drive_carla/mac_scenes/metadata.jsonl CHECKPOINT_DIR=checkpoints/m10d_action_token_smoke LOG_DIR=outputs/logs/m10d_action_token_smoke EPOCHS=2 MAX_SAMPLES=300 BATCH_SIZE=8 IMAGE_SIZE=64 DEVICE=auto LOG_EVERY=10 EARLY_STOP_PATIENCE= NUM_ACTION_TOKENS=64 TOKENIZER_PATH=outputs/logs/m10d_action_token_smoke/action_tokenizer.json scripts/train_lora.sh
+```
+
+결과:
+
+```text
+reasoning_aux: TRAINING_OK, initial_loss=8.769762, final_loss=1.341324, steps=114
+action_token: TRAINING_OK, initial_loss=4.082876, final_loss=0.499608, steps=76
+```
+
+Open-loop smoke:
+
+- 1000-sample open-loop 평가는 Mac에서 너무 오래 걸려 evaluator process를 종료하고 128-sample smoke로 낮췄다.
+
+```bash
+.conda/bin/python -m vla_drive.evaluation.evaluator --mode open_loop --checkpoint-path checkpoints/m10d_reasoning_aux_smoke/latest.pt --metadata-path /Volumes/DATASET/vla_drive_carla/mac_scenes/metadata.jsonl --report-path outputs/reports/m10d_reasoning_aux_open_loop_smoke.json --batch-size 8 --image-size 64 --max-samples 128 --device auto
+.conda/bin/python -m vla_drive.evaluation.evaluator --mode open_loop --checkpoint-path checkpoints/m10d_action_token_smoke/latest.pt --metadata-path /Volumes/DATASET/vla_drive_carla/mac_scenes/metadata.jsonl --report-path outputs/reports/m10d_action_token_open_loop_smoke.json --batch-size 8 --image-size 64 --max-samples 128 --device auto
+```
+
+결과:
+
+```text
+reasoning_aux: sample_count=128, ADE=1.7072, FDE=3.2278, route_deviation=0.2309, collision_proxy_rate=0.5234
+action_token: sample_count=128, ADE=1.7848, FDE=3.2818, route_deviation=0.2269, collision_proxy_rate=0.4844
+```
+
+다음:
+
+- 수집이 끝난 뒤 전체 metadata로 품질 리포트를 다시 낸다.
+- 과속/브레이크 과다 scene을 제외하거나 재수집한다.
+- Traffic Manager closed-loop baseline report를 생성한다.
+
+## 2026-06-03: M10D 현재 수집 scene 기준 balanced training/evaluation
+
+128-sample smoke 이후, 사용자가 "스모크말고 제대로 지금까지 수집된 씬에 대해 수행"을 요청했다. 수집은 계속 진행 중이므로 먼저 현재 combined metadata를 snapshot으로 고정했다.
+
+Snapshot:
+
+```bash
+mkdir -p tmp/m10d_current
+cp /Volumes/DATASET/vla_drive_carla/mac_scenes/metadata.jsonl tmp/m10d_current/metadata_snapshot.jsonl
+```
+
+결과:
+
+```text
+metadata_snapshot rows=23005
+completed scenes in snapshot=43
+```
+
+23,005 rows 전체 1 epoch run을 먼저 시도했지만 Mac 외장 볼륨 이미지 I/O와 12-image sample loading 때문에 너무 느렸다.
+
+시도:
+
+```bash
+.conda/bin/python -m vla_drive.training.train \
+  --stage reasoning_aux \
+  --metadata-path tmp/m10d_current/metadata_snapshot.jsonl \
+  --max-samples 23005 \
+  --batch-size 32 \
+  --num-workers 0
+```
+
+관찰:
+
+- `num_workers=2`는 기존 `train()` 내부 collate lambda가 pickle되지 않아 실패했다.
+- `num_workers=0`은 실행 가능했지만 23k full-row 1 epoch가 Mac에서 몇 시간 단위가 될 것으로 보여 중단했다.
+- `train.py` CLI 기본 `--max-samples=10`이 있어서 full/current run에는 명시적으로 `--max-samples`를 넣어야 한다.
+
+대안:
+
+- 현재 완료된 모든 scene을 반영하되, scene별 100 samples를 균등 추출한 balanced dataset을 만들었다.
+- 이는 tiny smoke가 아니라 현재 43개 scene 전체를 대표하도록 고정한 Mac-feasible run이다.
+
+```text
+tmp/m10d_current/metadata_scene_balanced_100.jsonl
+scenes=43
+rows=4300
+```
+
+Training:
+
+```bash
+.conda/bin/python -m vla_drive.training.train --stage reasoning_aux --metadata-path tmp/m10d_current/metadata_scene_balanced_100.jsonl --checkpoint-dir checkpoints/m10d_current_reasoning_aux_balanced --log-dir outputs/logs/m10d_current_reasoning_aux_balanced --epochs 3 --batch-size 32 --num-workers 0 --image-size 64 --max-samples 4300 --device auto --lr 1e-3 --log-every 25 --reasoning-mode fast --reasoning-loss-weight 0.1
+.conda/bin/python -m vla_drive.training.train --stage action_token --metadata-path tmp/m10d_current/metadata_scene_balanced_100.jsonl --checkpoint-dir checkpoints/m10d_current_action_token_balanced --log-dir outputs/logs/m10d_current_action_token_balanced --epochs 3 --batch-size 32 --num-workers 0 --image-size 64 --max-samples 4300 --device auto --lr 1e-3 --log-every 25 --num-action-tokens 64 --tokenizer-path checkpoints/m10d_current_action_token_balanced/tokenizer.json
+```
+
+Training results:
+
+```text
+reasoning_aux: TRAINING_OK, rows=4300, epochs=3, steps=405, initial_loss=8.505414, final_loss=1.222398, best_loss=2.291778
+action_token: TRAINING_OK, rows=4300, epochs=3, steps=405, initial_loss=4.094353, final_loss=0.518425, best_loss=1.376413
+```
+
+Open-loop evaluation:
+
+```bash
+.conda/bin/python -m vla_drive.evaluation.evaluator --mode open_loop --checkpoint-path checkpoints/m10d_current_reasoning_aux_balanced/latest.pt --metadata-path tmp/m10d_current/metadata_scene_balanced_100.jsonl --report-path outputs/reports/m10d_current_reasoning_aux_balanced_open_loop.json --batch-size 32 --image-size 64 --max-samples 4300 --device auto
+.conda/bin/python -m vla_drive.evaluation.evaluator --mode open_loop --checkpoint-path checkpoints/m10d_current_action_token_balanced/latest.pt --metadata-path tmp/m10d_current/metadata_scene_balanced_100.jsonl --report-path outputs/reports/m10d_current_action_token_balanced_open_loop.json --batch-size 32 --image-size 64 --max-samples 4300 --device auto
+```
+
+Open-loop results:
+
+```text
+reasoning_aux: sample_count=4300, ADE=1.806745, FDE=3.995674, route_deviation=0.520595, collision_proxy_rate=0.330465
+action_token: sample_count=4300, ADE=1.880799, FDE=4.234489, route_deviation=0.512368, collision_proxy_rate=0.310465
+```
+
+판단:
+
+- 현재 수집분으로 Mac에서 full-current scene coverage 학습/평가 path는 통과했다.
+- `reasoning_aux`가 ADE/FDE는 약간 낮고, `action_token`은 collision proxy가 약간 낮다.
+- 이 결과는 43 scene balanced subset 기준이며, 수집 완료 후 전체 scene 수 기준으로 다시 snapshot을 고정해야 한다.
+- 23k full-row 전체 학습은 Mac에서 너무 느려 RTX 5090 확장 후보로 남긴다.
+
+## 2026-06-04 - 100-scene command-conditioned final training/evaluation
+
+사용자가 "command 기준으로 학습"과 모든 단계의 `launchers/*.command` 실행을 요구했다. 기존 Mac dummy backbone은 prompt/route command text를 쓰지 않고 front image + speed만 사용했으므로, `DummyDrivingBackbone`에 route command one-hot feature를 추가했다.
+
+변경:
+
+- `src/vla_drive/models/backbone_vlm.py`
+  - `lane_follow/keep_lane`, `turn_left`, `turn_right`를 3-d one-hot으로 인코딩한다.
+  - lightweight Mac training도 image + speed + route command 조건으로 학습된다.
+- `launchers/03_학습.command`
+  - 주요 학습 인자를 `${VAR:-default}`로 바꿔 launcher를 통한 hyperparameter override가 가능하다.
+- `launchers/05_평가.command`, `scripts/eval_carla.sh`
+  - open-loop/closed-loop 평가 인자를 launcher 환경변수로 override 가능하게 했다.
+  - closed-loop CARLA timeout을 `CARLA_TIMEOUT_SECONDS`로 전달한다.
+- `src/vla_drive/training/train.py`
+  - 기존 `train_log.jsonl`, `train_summary.json` 저장에 더해 `training_curve.png`를 자동 생성하고 summary에 `training_curve` 경로를 기록한다.
+- `scripts/eval_carla_closed_loop.py`
+  - 이 CARLA PythonAPI에는 `World.get_client()`가 없어 `client`를 `_run_route()`로 직접 전달하게 했다.
+  - route 준비 중 실패해도 spawned actor cleanup이 되도록 `try/finally` 범위를 앞당겼다.
+- `AGENTS.md`
+  - 데이터 수집, 학습, open-loop 평가, closed-loop 평가는 `launchers/*.command`를 통해 실행한다는 규칙을 추가했다.
+
+Validation:
+
+```bash
+MPLCONFIGDIR=.matplotlib_cache .conda/bin/python -m pytest tests/unit/test_vla_policy_m3.py -q -k 'dummy'
+bash -n launchers/03_학습.command
+bash -n launchers/05_평가.command
+bash -n scripts/eval_carla.sh
+```
+
+Result:
+
+```text
+2 passed, 2 deselected
+launcher/script syntax checks passed
+```
+
+Hyperparameter tuning was executed through `launchers/03_학습.command` on the 100-scene balanced metadata:
+
+```text
+metadata=tmp/m10d_final/metadata_scene_balanced_100.jsonl
+rows=10000
+tuning subset=3000 rows
+stage=reasoning_aux
+image_size=64
+batch_size=32
+reasoning_loss_weight=0.1
+```
+
+Tuning results:
+
+| Run | LR | Final loss | Best epoch loss |
+| --- | ---: | ---: | ---: |
+| `m10d_final_cmd_tune_lr1e3_rw01` | 1e-3 | 1.4158 | 2.8222 |
+| `m10d_final_cmd_tune_lr5e4_rw01` | 5e-4 | 2.6592 | 5.0343 |
+
+Selected `LR=1e-3`.
+
+Final training through `launchers/03_학습.command`:
+
+```text
+checkpoint=checkpoints/m10d_final_cmd_reasoning_aux_balanced/latest.pt
+samples=10000
+epochs=3
+steps=939
+initial_loss=8.4334
+final_loss=3.1133
+best_epoch=2
+best_epoch_loss=1.7789
+training_curve=outputs/logs/m10d_final_cmd_reasoning_aux_balanced/training_curve.png
+```
+
+Open-loop evaluation through `launchers/05_평가.command`:
+
+```text
+report=outputs/reports/m10d_final_cmd_reasoning_aux_balanced_best_open_loop.json
+sample_count=10000
+ADE=1.4648
+FDE=3.1421
+route_deviation=0.4466
+collision_proxy_rate=31.58%
+```
+
+CARLA closed-loop evaluation:
+
+- Current closed-loop runner evaluates Traffic Manager autopilot, not the learned checkpoint policy.
+- 5 routes x 20s failed repeatedly on Mac CrossOver CARLA with streaming connection refused and simulator timeout during map/spawn-point access.
+- Reduced sanity run succeeded through `launchers/05_평가.command` with 1 route x 8s.
+
+```text
+report=outputs/reports/m10d_final_cmd_tm_closed_loop_min.json
+policy=Traffic Manager baseline
+routes=1
+route_completion=35.76%
+driving_score=35.76%
+infraction_penalty=1.0000
+collisions=0
+failure_reason=incomplete
+```
+
+Summary report:
+
+```text
+outputs/reports/m10d_final_cmd_training_eval_summary.md
+```
+
+## 2026-06-04 - Learned-policy CARLA closed-loop evaluation path
+
+이전 closed-loop report는 Traffic Manager baseline이어서 "학습 결과의 CARLA 실시간 평가" 요구를 직접 만족하지 못했다. CrossOver CARLA client는 Windows Python 3.7에서 실행되고, 학습 checkpoint는 Mac `.conda` torch 환경에서 실행되므로 learned-policy closed-loop를 socket bridge 구조로 추가했다.
+
+구조:
+
+- `scripts/serve_policy_inference.py`
+  - Mac `.conda` Python에서 checkpoint를 로드한다.
+  - local TCP socket으로 RGB frame, ego speed, route command를 받아 waypoint/control/reasoning을 반환한다.
+- `scripts/eval_carla_learned_closed_loop.py`
+  - CrossOver Windows Python에서 CARLA client를 실행한다.
+  - RGB camera frame을 inference server로 보내고, 반환된 control을 `vehicle.apply_control()`에 적용한다.
+  - route completion, driving score, collision, reasoning/control record, policy latency를 report에 저장한다.
+  - HUD 렌더링을 위해 frame image path, `reasoning_head`, `waypoint_head`, `action_head` status, steer/throttle/brake, acceleration, route waypoints, predicted waypoints를 tick별로 저장한다.
+- `scripts/eval_carla_learned.sh`
+  - CrossOver wrapper.
+- `scripts/render_learned_closed_loop_video.py`
+  - learned closed-loop report와 저장된 frame을 읽어 HUD mp4를 생성한다.
+  - RGB view, head outputs, steer/throttle/brake bar, acceleration, route wp, pred wp mini-map을 1280x720 canvas에 표시한다.
+- `launchers/05_평가.command`
+  - `EVAL_MODE=learned_closed_loop`를 추가했다.
+  - launcher 내부에서 Mac inference server를 background로 띄우고, Wine CARLA client 평가가 끝나면 server를 정리한다.
+  - learned 평가가 끝나면 HUD video rendering까지 이어서 실행한다.
+- `src/vla_drive/evaluation/waypoint_control.py`
+  - predicted ego-frame waypoints를 평가용 CARLA control로 변환한다.
+
+Validation:
+
+```bash
+bash -n launchers/05_평가.command
+bash -n scripts/eval_carla_learned.sh
+.conda/bin/python -m py_compile scripts/serve_policy_inference.py scripts/eval_carla_learned_closed_loop.py
+MPLCONFIGDIR=.matplotlib_cache .conda/bin/python -m pytest tests/unit/test_waypoint_control.py tests/unit/test_vla_policy_m3.py -q -k 'dummy or waypoint_control'
+MPLCONFIGDIR=.matplotlib_cache .conda/bin/python scripts/serve_policy_inference.py --checkpoint-path checkpoints/m10d_final_cmd_reasoning_aux_balanced/latest.pt --host 127.0.0.1 --port 8766 --device auto --image-size 64
+MPLCONFIGDIR=.matplotlib_cache .conda/bin/python scripts/render_learned_closed_loop_video.py --report-path outputs/reports/m10d_final_cmd_learned_closed_loop_hud_report.json --video-path outputs/reports/m10d_final_cmd_learned_closed_loop_hud.mp4 --fps 5
+```
+
+Result:
+
+```text
+4 passed, 2 deselected
+POLICY_SERVER_READY stage=reasoning_aux device=mps
+RENDER_LEARNED_CLOSED_LOOP_VIDEO_OK frame_count=40 fps=5.0
+```
+
+Learned closed-loop run:
+
+```bash
+EVAL_MODE=learned_closed_loop \
+CHECKPOINT_PATH=checkpoints/m10d_final_cmd_reasoning_aux_balanced/best.pt \
+CARLA_TOWN=current \
+ROUTE_COUNT=1 \
+ROUTE_SECONDS=8 \
+LEARNED_EVAL_FPS=5 \
+LEARNED_CLOSED_LOOP_REPORT_PATH=outputs/reports/m10d_final_cmd_learned_closed_loop_best_min.json \
+WAIT_FOR_CARLA_SECONDS=60 \
+CARLA_TIMEOUT_SECONDS=90.0 \
+ROUTE_COMMAND=lane_follow \
+DEVICE=auto \
+OPEN_LOOP_IMAGE_SIZE=64 \
+bash launchers/05_평가.command
+```
+
+Result:
+
+```text
+EVAL_CARLA_LEARNED_CLOSED_LOOP_OK
+report=outputs/reports/m10d_final_cmd_learned_closed_loop_best_min.json
+routes=1
+seconds_per_route=8
+route_completion=0.13%
+driving_score=0.13%
+infraction_penalty=1.0000
+collisions=0
+mean_policy_latency_ms=5.49
+mean_policy_roundtrip_ms=6.83
+reasoning_counts={slow_or_stop: 40}
+```
+
+HUD video run:
+
+```bash
+EVAL_MODE=learned_closed_loop \
+CHECKPOINT_PATH=checkpoints/m10d_final_cmd_reasoning_aux_balanced/best.pt \
+CARLA_TOWN=current \
+ROUTE_COUNT=1 \
+ROUTE_SECONDS=8 \
+LEARNED_EVAL_FPS=5 \
+LEARNED_CLOSED_LOOP_REPORT_PATH=outputs/reports/m10d_final_cmd_learned_closed_loop_hud_report.json \
+LEARNED_ARTIFACT_DIR=outputs/reports/m10d_final_cmd_learned_closed_loop_hud_artifacts \
+LEARNED_VIDEO_PATH=outputs/reports/m10d_final_cmd_learned_closed_loop_hud.mp4 \
+WAIT_FOR_CARLA_SECONDS=60 \
+CARLA_TIMEOUT_SECONDS=90.0 \
+ROUTE_COMMAND=lane_follow \
+DEVICE=auto \
+OPEN_LOOP_IMAGE_SIZE=64 \
+bash launchers/05_평가.command
+```
+
+HUD artifact:
+
+```text
+video=outputs/reports/m10d_final_cmd_learned_closed_loop_hud.mp4
+sidecar=outputs/reports/m10d_final_cmd_learned_closed_loop_hud.json
+first_frame=outputs/reports/m10d_final_cmd_learned_closed_loop_hud_frame000.png
+report=outputs/reports/m10d_final_cmd_learned_closed_loop_hud_report.json
+frames=40
+```
+
+HUD includes:
+
+- RGB camera view
+- `reasoning_head`: all ticks `slow_or_stop`
+- `waypoint_head`: first and final predicted waypoint text
+- `action_head`: `N/A for reasoning_aux`
+- steer, throttle, brake bars
+- speed and acceleration
+- route waypoints and predicted waypoints mini-map
+
+2026-06-04 추가 수정:
+
+- `launchers/02_카를라연결확인.command` 기준 현재 평가 서버 world는 `Carla/Maps/Town10HD_Opt`였다.
+- `scripts/eval_carla_learned_closed_loop.py` report에 `map_name`과 `town_arg`를 저장하게 했다.
+- `launchers/05_평가.command` learned mode 기본 출력 경로를 날짜별 run directory로 바꿨다.
+
+Default learned output layout:
+
+```text
+outputs/reports/learned_closed_loop/YYYYmmdd_HHMMSS/
+  report.json
+  hud.mp4
+  hud.json
+  run_metadata.json
+  policy_server.log
+  eval.log
+  render.log
+  artifacts/
+```
+
+Verified run:
+
+```text
+run_dir=outputs/reports/learned_closed_loop/20260604_064103
+map_name=Carla/Maps/Town10HD_Opt
+town_arg=current
+video=outputs/reports/learned_closed_loop/20260604_064103/hud.mp4
+frame_count=40
+fps=5.0
+logs=policy_server.log, eval.log, render.log
+metadata=run_metadata.json
+```
+
+2026-06-04 Town01 재평가:
+
+사용자가 평가 맵을 Town01로 진행하라고 지정했다. `CARLA_TOWN=Town01`로 learned closed-loop를 다시 실행해 report의 `map_name`이 `Carla/Maps/Town01`로 저장되는 것을 확인했다.
+
+```text
+run_dir=outputs/reports/learned_closed_loop/20260604_065005
+map_name=Carla/Maps/Town01
+town_arg=Town01
+video=outputs/reports/learned_closed_loop/20260604_065005/hud.mp4
+report=outputs/reports/learned_closed_loop/20260604_065005/report.json
+frame_count=40
+fps=5.0
+route_completion=0.074%
+driving_score=0.074%
+collisions=0
+reasoning_counts={slow_or_stop: 40}
+```
+
+Driving evaluation table:
+
+| Policy | Eval mode | Routes | Seconds/route | Route completion | Driving score | Infraction penalty | Collisions | Red lights | Offroad | Failure reason |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Traffic Manager baseline | closed_loop | 1 | 8 | 35.76% | 35.76% | 1.0000 | 0 | 0 | 0 | incomplete |
+| Learned waypoint policy | learned_closed_loop | 1 | 8 | 0.13% | 0.13% | 1.0000 | 0 | 0 | 0 | incomplete |
+
+판단:
+
+- learned checkpoint가 CARLA에서 실시간으로 추론되고 control이 적용되는 경로는 통과했다.
+- 그러나 현재 모델은 closed-loop 시작 상태에서 `slow_or_stop`만 출력하고 throttle을 0으로 유지한다.
+- open-loop ADE/FDE는 감소했지만 closed-loop에서는 정지 policy로 붕괴한다. 다음 개선은 stop/start 불균형, speed-conditioned waypoint label, 초기 정지 상태에서 출발해야 하는 샘플 보강, 또는 control head 직접 학습을 우선 확인해야 한다.
+- Mac CrossOver CARLA는 map reload 후 streaming timeout이 자주 발생했다. `CARLA_TOWN=current`로 현재 world를 재사용하면 learned 1-route sanity는 성공했다.

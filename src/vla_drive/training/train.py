@@ -195,6 +195,12 @@ def train(args: argparse.Namespace) -> dict:
     final_loss = losses[-1]
     initial_loss = losses[0]
     _save_checkpoint(checkpoint_dir / "latest.pt", model, optimizer, last_epoch, global_step, final_loss, args)
+    chart_path = log_dir / "training_curve.png"
+    chart_written = _write_training_curve(
+        chart_path=chart_path,
+        losses=losses,
+        log_path=log_path,
+    )
     summary = {
         "initial_loss": initial_loss,
         "final_loss": final_loss,
@@ -206,6 +212,7 @@ def train(args: argparse.Namespace) -> dict:
         "steps": global_step,
         "checkpoint": str(checkpoint_dir / "latest.pt"),
         "log": str(log_path),
+        "training_curve": str(chart_path) if chart_written else None,
     }
     (log_dir / "train_summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
     print("TRAINING_OK")
@@ -244,6 +251,48 @@ def _save_checkpoint(
         },
         path,
     )
+
+
+def _write_training_curve(chart_path: Path, losses: list[float], log_path: Path) -> bool:
+    if not losses:
+        return False
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except Exception as exc:
+        LOGGER.warning("training curve skipped: matplotlib unavailable: %s", exc)
+        return False
+
+    chart_path.parent.mkdir(parents=True, exist_ok=True)
+    logged_steps: list[int] = []
+    logged_losses: list[float] = []
+    if log_path.exists():
+        for line in log_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if "step" in record and "loss" in record:
+                logged_steps.append(int(record["step"]))
+                logged_losses.append(float(record["loss"]))
+
+    fig, ax = plt.subplots(figsize=(8, 4.5), dpi=140)
+    ax.plot(range(1, len(losses) + 1), losses, color="#2563eb", linewidth=1.2, alpha=0.45, label="batch loss")
+    if logged_steps:
+        ax.scatter(logged_steps, logged_losses, color="#dc2626", s=14, label="logged steps", zorder=3)
+    ax.set_title("Training Loss")
+    ax.set_xlabel("step")
+    ax.set_ylabel("loss")
+    ax.grid(True, linewidth=0.5, alpha=0.35)
+    ax.legend(loc="upper right")
+    fig.tight_layout()
+    fig.savefig(chart_path)
+    plt.close(fig)
+    return True
 
 
 def _load_or_fit_tokenizer(args: argparse.Namespace, dataset) -> TrajectoryActionTokenizer:

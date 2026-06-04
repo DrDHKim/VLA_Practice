@@ -39,38 +39,37 @@ def _spawn_vehicle(world, route_index: int, spawn_start_index: int):
     raise RuntimeError("Could not spawn vehicle")
 
 
-def _run_route(world, route_index: int, args) -> RouteEvaluation:
+def _run_route(client, world, route_index: int, args) -> RouteEvaluation:
     import carla
 
     actors = []
     collision_events = queue.Queue()
-    vehicle = _spawn_vehicle(world, route_index, args.spawn_start_index)
-    actors.append(vehicle)
-    collision_bp = world.get_blueprint_library().find("sensor.other.collision")
-    collision_sensor = world.spawn_actor(collision_bp, carla.Transform(), attach_to=vehicle)
-    actors.append(collision_sensor)
-    collision_sensor.listen(collision_events.put)
-
-    client = world.get_client()
-    traffic_manager = client.get_trafficmanager(args.tm_port)
-    traffic_manager.set_synchronous_mode(False)
-    traffic_manager.set_global_distance_to_leading_vehicle(args.distance_to_leading_vehicle_m)
-    if hasattr(traffic_manager, "set_desired_speed"):
-        traffic_manager.set_desired_speed(vehicle, args.target_speed_mps * 3.6)
-    else:
-        traffic_manager.vehicle_percentage_speed_difference(vehicle, args.speed_percentage_difference)
-    traffic_manager.auto_lane_change(vehicle, args.auto_lane_change)
-    traffic_manager.ignore_lights_percentage(vehicle, args.ignore_lights_percentage)
-    if hasattr(traffic_manager, "ignore_signs_percentage"):
-        traffic_manager.ignore_signs_percentage(vehicle, args.ignore_signs_percentage)
-    if hasattr(traffic_manager, "ignore_vehicles_percentage"):
-        traffic_manager.ignore_vehicles_percentage(vehicle, args.ignore_vehicles_percentage)
-    vehicle.set_autopilot(True, traffic_manager.get_port())
-
-    start_location = vehicle.get_transform().location
-    max_distance_m = 0.0
-
+    vehicle = None
     try:
+        vehicle = _spawn_vehicle(world, route_index, args.spawn_start_index)
+        actors.append(vehicle)
+        collision_bp = world.get_blueprint_library().find("sensor.other.collision")
+        collision_sensor = world.spawn_actor(collision_bp, carla.Transform(), attach_to=vehicle)
+        actors.append(collision_sensor)
+        collision_sensor.listen(collision_events.put)
+
+        traffic_manager = client.get_trafficmanager(args.tm_port)
+        traffic_manager.set_synchronous_mode(False)
+        traffic_manager.set_global_distance_to_leading_vehicle(args.distance_to_leading_vehicle_m)
+        if hasattr(traffic_manager, "set_desired_speed"):
+            traffic_manager.set_desired_speed(vehicle, args.target_speed_mps * 3.6)
+        else:
+            traffic_manager.vehicle_percentage_speed_difference(vehicle, args.speed_percentage_difference)
+        traffic_manager.auto_lane_change(vehicle, args.auto_lane_change)
+        traffic_manager.ignore_lights_percentage(vehicle, args.ignore_lights_percentage)
+        if hasattr(traffic_manager, "ignore_signs_percentage"):
+            traffic_manager.ignore_signs_percentage(vehicle, args.ignore_signs_percentage)
+        if hasattr(traffic_manager, "ignore_vehicles_percentage"):
+            traffic_manager.ignore_vehicles_percentage(vehicle, args.ignore_vehicles_percentage)
+        vehicle.set_autopilot(True, traffic_manager.get_port())
+
+        start_location = vehicle.get_transform().location
+        max_distance_m = 0.0
         ticks = max(1, int(args.route_seconds * args.fps))
         for _ in range(ticks):
             world.wait_for_tick(seconds=args.timeout)
@@ -82,10 +81,11 @@ def _run_route(world, route_index: int, args) -> RouteEvaluation:
             collision_count=collision_count,
         )
     finally:
-        try:
-            vehicle.set_autopilot(False)
-        except Exception:
-            pass
+        if vehicle is not None:
+            try:
+                vehicle.set_autopilot(False)
+            except Exception:
+                pass
         for actor in reversed(actors):
             try:
                 actor.destroy()
@@ -141,7 +141,7 @@ def main() -> None:
     if args.weather and hasattr(carla.WeatherParameters, args.weather):
         world.set_weather(getattr(carla.WeatherParameters, args.weather))
 
-    routes = [_run_route(world, idx, args) for idx in range(args.route_count)]
+    routes = [_run_route(client, world, idx, args) for idx in range(args.route_count)]
     report = {
         "routes": [route.to_dict() for route in routes],
         "aggregate": aggregate_route_evaluations(routes),
