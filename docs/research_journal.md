@@ -2151,3 +2151,12 @@ Driving evaluation table:
 - HUD 영상: warm-up 구간도 프레임 기록(`phase=WARM-UP`)해서 영상에 포함. HUD 영상용 **3인칭 체이스 카메라**(`_spawn_chase_camera`, 뒤7m·위3.5m·-15°) 추가 — 모델 입력은 전방 카메라 유지, 영상만 체이스. render에 phase/policy_type/action_tokens 표시.
 - 안정화: 이미 같은 맵이면 `load_world` 재로드(타임아웃·크래시 원인) 생략하고 현재 world 재사용(REUSING_WORLD). `05_평가.command`가 policy server 기동 전 포트(8765) 점유 프로세스·잔존 eval 클라이언트를 정리하고, 기동을 `POLICY_SERVER_READY`+PID 생존으로 확인(Address already in use/유령 프로세스로 인한 fatal 방지). synchronous mode/fixed delta 옵션 추가.
 - AutoVLA eval 통합(구현, closed-loop 실검증 미완): `POLICY_TYPE=autovla`면 serve/eval/05가 회귀 어댑터 대신 generate 모델(`autovla_generate`)로 평가하도록 배선. 05 기본 checkpoint를 `checkpoints/m10d_autovla_lora`로. 실제 CARLA closed-loop 검증은 후속.
+
+2026-06-06 AutoVLA step-800 평가 launcher 사전 검증:
+
+- `05_평가.command` 기본 평가 대상을 `checkpoints/m10d_autovla_lora`의 AutoVLA LoRA로 전환하고, base model/codebook/adapter 필수 파일 검사와 policy server 최대 300초 기동 대기를 추가했다. 현재 root `training_state.json`은 step 800(epoch 1/2, step_in_epoch 800)이다.
+- Mac policy server에서 실제 step-800 adapter+base model을 MPS로 로드한 뒤 합성 3카메라 요청을 전송했다. 약 1분 46초 후 서버 ready, 단일 생성 약 8.55초, reasoning 문장 + action token 10개 + waypoint 10개 + control 응답까지 정상 확인했다.
+- closed-loop 모델 입력을 학습과 같은 front/front-left/front-right 카메라 extrinsic과 gamma 2.2로 맞췄다. AutoVLA에는 글로벌 route waypoint 자체를 입력하지 않고, 글로벌 경로에서 계산한 high-level command만 입력한다. route waypoint는 HUD/분석에 사용한다.
+- 생성 지연 중 CARLA world가 비동기로 진행되는 평가 오류를 막기 위해 learned closed-loop 기본값을 synchronous mode, fixed delta 0.2초(5 FPS)로 변경했다. HUD/report에 생성 reasoning, action token, predicted waypoint, route waypoint, control을 기록한다.
+- 사전 검증: launcher/shell 구문 검사, local Python 및 CrossOver Python 3.7 compile, `git diff --check`, HUD MP4 writer 실제 생성, AutoVLA/route/control 관련 unit test 16개 통과. CARLA port 2000은 현재 닫혀 있지만 05가 `01_카를라실행.command`를 자동 실행하도록 준비되어 있다. 실제 Town01 closed-loop 주행은 사용자 실행 후 결과 확인이 필요하다.
+- HUD reasoning 가독성: 기존 한 줄 46자 절단을 제거하고 reasoning을 별도 최대 5줄로 줄바꿈해 약 225자까지 표시한다. 늘어난 텍스트 영역과 겹치지 않도록 steer/throttle/brake bar를 아래로 이동했다.

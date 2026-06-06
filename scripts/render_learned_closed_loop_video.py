@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import textwrap
 from pathlib import Path
 
 import cv2
@@ -48,6 +49,22 @@ def _draw_bar(image: np.ndarray, label: str, value: float, x: int, y: int, width
     cv2.putText(image, label, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (230, 230, 230), 1, cv2.LINE_AA)
     cv2.rectangle(image, (x, y), (x + width, y + 12), (60, 60, 60), 1)
     cv2.rectangle(image, (x, y), (x + int(width * value), y + 12), color, -1)
+
+
+def _reasoning_lines(reasoning: object, max_lines: int = 5) -> list[str]:
+    wrapped = textwrap.wrap(
+        str(reasoning),
+        width=45,
+        break_long_words=True,
+        break_on_hyphens=False,
+    ) or ["N/A"]
+    if len(wrapped) > max_lines:
+        wrapped = wrapped[:max_lines]
+        wrapped[-1] = wrapped[-1][:-3].rstrip() + "..."
+    return [
+        ("reasoning=" if idx == 0 else "          ") + line
+        for idx, line in enumerate(wrapped)
+    ]
 
 
 def _draw_waypoint_map(
@@ -116,6 +133,7 @@ def _render_frame(frame: np.ndarray, record: dict, report: dict, index: int, tot
     else:
         phase_line = ("phase=policy after warmup" if warmup_seconds > 0 else "phase=policy", (120, 255, 170))
 
+    reasoning_color = (120, 220, 255) if reasoning != "slow_or_stop" else (80, 120, 255)
     lines = [
         (f"route={record.get('route_id')} tick={record.get('tick')} frame={index + 1}/{total}", (245, 245, 245)),
         phase_line,
@@ -123,7 +141,8 @@ def _render_frame(frame: np.ndarray, record: dict, report: dict, index: int, tot
         (f"cmd={route_command}  route_wp_input={'on' if route_wp_used else 'off'}", (210, 230, 255)),
         (f"speed={speed:.3f} m/s  accel={accel:.3f} m/s2", (245, 245, 245)),
         (f"steer={steer:+.3f}  throttle={throttle:.3f}  brake={brake:.3f}", (245, 245, 245)),
-        (f"policy={policy_type} reasoning={str(reasoning)[:46]}", (120, 220, 255) if reasoning != "slow_or_stop" else (80, 120, 255)),
+        (f"policy={policy_type}", reasoning_color),
+        *[(line, reasoning_color) for line in _reasoning_lines(reasoning)],
         (f"waypoint_head[0]={_fmt_wp(pred_wp, 0)}", (255, 230, 120)),
         (f"waypoint_head[-1]={_fmt_wp(pred_wp, -1)}", (255, 230, 120)),
         (f"action_tokens={action_tokens[:10] if action_tokens else 'N/A'}", (210, 190, 255)),
@@ -131,9 +150,9 @@ def _render_frame(frame: np.ndarray, record: dict, report: dict, index: int, tot
         (f"failure={record.get('failure_reason')}", (120, 120, 255)),
     ]
     _draw_text_block(canvas, lines, 820, 34)
-    _draw_bar(canvas, "steer left/right magnitude", abs(steer), 820, 300, 390, (70, 170, 255))
-    _draw_bar(canvas, "throttle", throttle, 820, 350, 390, (70, 210, 90))
-    _draw_bar(canvas, "brake", brake, 820, 400, 390, (70, 70, 230))
+    _draw_bar(canvas, "steer left/right magnitude", abs(steer), 820, 440, 390, (70, 170, 255))
+    _draw_bar(canvas, "throttle", throttle, 820, 495, 390, (70, 210, 90))
+    _draw_bar(canvas, "brake", brake, 820, 550, 390, (70, 70, 230))
     _draw_waypoint_map(canvas, route_wp, pred_wp, 20, 478, 780, 210)
     return canvas
 

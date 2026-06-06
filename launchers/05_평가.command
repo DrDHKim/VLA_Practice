@@ -114,6 +114,11 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
 if [[ "$EVAL_MODE" == "open_loop" ]]; then
+  if [[ "$POLICY_TYPE" == "autovla" ]]; then
+    echo "AutoVLA 생성 모델의 open-loop evaluator는 아직 05에 연결되지 않았습니다."
+    echo "기본값 EVAL_MODE=learned_closed_loop로 CARLA 평가를 실행하세요."
+    exit 1
+  fi
   if [[ ! -f "$CHECKPOINT_PATH" ]]; then
     echo "checkpoint가 없습니다: $CHECKPOINT_PATH"
     exit 1

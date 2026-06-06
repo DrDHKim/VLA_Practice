@@ -58,6 +58,8 @@ def _spawn_rgb_camera(world, vehicle, width, height, fov, fps, x=2.2, y=0.0, yaw
     bp.set_attribute("sensor_tick", str(1.0 / fps))
     if bp.has_attribute("enable_postprocess_effects"):
         bp.set_attribute("enable_postprocess_effects", "True")
+    if bp.has_attribute("gamma"):
+        bp.set_attribute("gamma", "2.2")
     transform = carla.Transform(
         carla.Location(x=float(x), y=float(y), z=2.0),
         carla.Rotation(pitch=-8.0, yaw=float(yaw_deg)),
