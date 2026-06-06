@@ -29,6 +29,8 @@ class Observation:
 
     # ── Navigation & ego state ────────────────────────────────────────────────
     route_command: str = "keep_lane"
+    # [N, 3]: route centerline waypoints in ego frame, used as model input.
+    route_waypoints_ego: Optional[list[list[float]]] = None
     ego_speed_mps: float = 0.0
     ego_accel_mps2: Optional[float] = None   # scalar magnitude
     ego_heading_rad: Optional[float] = None  # yaw in CARLA world frame (radians)

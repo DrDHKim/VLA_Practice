@@ -87,11 +87,16 @@ def build_dummy_policy(
     hidden_dim: int = 64,
     waypoint_count: int = 10,
     waypoint_dim: int = 3,
+    use_route_waypoints: bool = False,
 ) -> VLADrivingPolicy:
     from vla_drive.models.backbone_vlm import DummyDrivingBackbone
 
     return VLADrivingPolicy(
-        backbone=DummyDrivingBackbone(hidden_dim=hidden_dim),
+        backbone=DummyDrivingBackbone(
+            hidden_dim=hidden_dim,
+            use_route_waypoints=use_route_waypoints,
+            route_waypoint_count=waypoint_count,
+        ),
         hidden_dim=hidden_dim,
         waypoint_count=waypoint_count,
         waypoint_dim=waypoint_dim,
@@ -103,11 +108,16 @@ def build_reasoning_aux_policy(
     waypoint_count: int = 10,
     waypoint_dim: int = 3,
     num_reasoning_labels: int = 4,
+    use_route_waypoints: bool = False,
 ) -> ReasoningAuxPolicy:
     from vla_drive.models.backbone_vlm import DummyDrivingBackbone
 
     return ReasoningAuxPolicy(
-        backbone=DummyDrivingBackbone(hidden_dim=hidden_dim),
+        backbone=DummyDrivingBackbone(
+            hidden_dim=hidden_dim,
+            use_route_waypoints=use_route_waypoints,
+            route_waypoint_count=waypoint_count,
+        ),
         hidden_dim=hidden_dim,
         waypoint_count=waypoint_count,
         waypoint_dim=waypoint_dim,
@@ -119,11 +129,16 @@ def build_action_token_policy(
     num_tokens: int = 256,
     hidden_dim: int = 64,
     waypoint_count: int = 10,
+    use_route_waypoints: bool = False,
 ) -> ActionTokenPolicy:
     from vla_drive.models.backbone_vlm import DummyDrivingBackbone
 
     return ActionTokenPolicy(
-        backbone=DummyDrivingBackbone(hidden_dim=hidden_dim),
+        backbone=DummyDrivingBackbone(
+            hidden_dim=hidden_dim,
+            use_route_waypoints=use_route_waypoints,
+            route_waypoint_count=waypoint_count,
+        ),
         hidden_dim=hidden_dim,
         waypoint_count=waypoint_count,
         num_tokens=num_tokens,

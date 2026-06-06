@@ -24,3 +24,25 @@ def test_waypoint_control_brakes_for_near_zero_forward_progress() -> None:
 
     assert control["throttle"] == 0.0
     assert control["brake"] > 0.0
+
+
+def test_waypoint_control_horizon_changes_speed_interpretation() -> None:
+    waypoints = [[0.8, 0.0, 0.0], [8.5, 0.0, 0.0]]
+
+    five_second_horizon = waypoint_control_from_prediction(
+        waypoints,
+        current_speed_mps=3.0,
+        target_speed_mps=5.0,
+        horizon_seconds=5.0,
+    )
+    two_second_horizon = waypoint_control_from_prediction(
+        waypoints,
+        current_speed_mps=3.0,
+        target_speed_mps=5.0,
+        horizon_seconds=2.0,
+    )
+
+    assert five_second_horizon["throttle"] == 0.0
+    assert five_second_horizon["brake"] > 0.0
+    assert two_second_horizon["throttle"] > 0.0
+    assert two_second_horizon["brake"] == 0.0

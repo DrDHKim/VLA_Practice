@@ -21,6 +21,7 @@ data/bench2drive/
 checkpoints/
 outputs/runs/
 outputs/logs/
+outputs/reports/
 outputs/figures/
 
 *.ckpt

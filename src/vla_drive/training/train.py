@@ -20,6 +20,21 @@ from vla_drive.utils.seed import seed_everything
 LOGGER = get_logger(__name__)
 
 
+class DrivingCollator:
+    def __init__(self, image_size: int | None, reasoning_mode: str, vlm_frames_per_camera: int = 4) -> None:
+        self.image_size = image_size
+        self.reasoning_mode = reasoning_mode
+        self.vlm_frames_per_camera = vlm_frames_per_camera
+
+    def __call__(self, samples):
+        return driving_collate_fn(
+            samples,
+            image_size=self.image_size,
+            reasoning_mode=self.reasoning_mode,
+            vlm_frames_per_camera=self.vlm_frames_per_camera,
+        )
+
+
 def select_device(requested: str) -> torch.device:
     if requested == "auto":
         if torch.cuda.is_available():
@@ -33,20 +48,35 @@ def select_device(requested: str) -> torch.device:
 def train(args: argparse.Namespace) -> dict:
     seed_everything(args.seed)
     device = select_device(args.device)
+    LOGGER.info(
+        "device=%s batch_size=%s num_workers=%s image_size=%s max_samples=%s",
+        device,
+        args.batch_size,
+        args.num_workers,
+        args.image_size,
+        args.max_samples,
+    )
 
     dataset = JsonlDrivingDataset(args.metadata_path)
     if args.max_samples is not None:
         dataset = Subset(dataset, list(range(min(args.max_samples, len(dataset)))))
+    if args.use_route_waypoints and not _dataset_has_route_waypoints(dataset):
+        raise RuntimeError(
+            "use_route_waypoints=True but metadata has no observation.route_waypoints_ego. "
+            "Collect route-waypoint metadata first or set USE_ROUTE_WAYPOINTS=0."
+        )
     loader = DataLoader(
         dataset,
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=args.num_workers,
-        collate_fn=lambda samples: driving_collate_fn(
-            samples,
+        collate_fn=DrivingCollator(
             image_size=args.image_size,
             reasoning_mode=args.reasoning_mode,
+            vlm_frames_per_camera=args.vlm_frames_per_camera,
         ),
+        persistent_workers=args.num_workers > 0,
+        prefetch_factor=2 if args.num_workers > 0 else None,
     )
     if len(loader) == 0:
         raise RuntimeError(f"No training samples found: {args.metadata_path}")
@@ -58,6 +88,7 @@ def train(args: argparse.Namespace) -> dict:
             num_tokens=args.num_action_tokens,
             hidden_dim=args.hidden_dim,
             waypoint_count=args.waypoint_count,
+            use_route_waypoints=args.use_route_waypoints,
         ).to(device)
     elif args.stage == "reasoning_aux":
         if args.num_reasoning_labels is None:
@@ -67,12 +98,14 @@ def train(args: argparse.Namespace) -> dict:
             waypoint_count=args.waypoint_count,
             waypoint_dim=args.waypoint_dim,
             num_reasoning_labels=args.num_reasoning_labels,
+            use_route_waypoints=args.use_route_waypoints,
         ).to(device)
     elif args.stage == "dummy_overfit":
         model = build_dummy_policy(
             hidden_dim=args.hidden_dim,
             waypoint_count=args.waypoint_count,
             waypoint_dim=args.waypoint_dim,
+            use_route_waypoints=args.use_route_waypoints,
         ).to(device)
     elif args.stage == "frozen_vlm":
         model = build_vlm_policy(
@@ -315,6 +348,17 @@ def _load_or_fit_tokenizer(args: argparse.Namespace, dataset) -> TrajectoryActio
     return tokenizer
 
 
+def _dataset_has_route_waypoints(dataset) -> bool:
+    source = dataset.dataset if isinstance(dataset, Subset) else dataset
+    indices = dataset.indices if isinstance(dataset, Subset) else range(len(source))
+    for idx in list(indices)[: min(128, len(indices))]:
+        record = source.records[int(idx)]
+        route_waypoints = record.get("observation", {}).get("route_waypoints_ego")
+        if route_waypoints:
+            return True
+    return False
+
+
 def _action_token_step_loss(
     output: dict,
     batch: dict,
@@ -358,6 +402,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--image-size", type=int, default=64)
+    parser.add_argument(
+        "--vlm-frames-per-camera",
+        type=int,
+        default=4,
+        help="VLM 백본에 카메라당 넣을 프레임 수(1~4). 1=3카메라 현재프레임만(3장), 4=12장. "
+        "MPS에서 이미지 수에 비례해 느려지므로 M4에선 1 권장.",
+    )
     parser.add_argument("--waypoint-count", type=int, default=10)
     parser.add_argument("--waypoint-dim", type=int, default=3)
     parser.add_argument("--hidden-dim", type=int, default=64)
@@ -377,6 +428,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--reasoning-mode", choices=["fast", "slow"], default="fast")
     parser.add_argument("--num-reasoning-labels", type=int, default=None)
     parser.add_argument("--reasoning-loss-weight", type=float, default=0.1)
+    parser.add_argument("--use-route-waypoints", action="store_true")
     parser.add_argument("--early-stop-patience", type=int, default=None)
     parser.add_argument("--early-stop-min-delta", type=float, default=0.0)
     parser.add_argument("--early-stop-min-epochs", type=int, default=1)

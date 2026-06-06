@@ -35,7 +35,7 @@ NUM_CAMERAS = 3
 NUM_FRAMES = 4
 
 
-def driving_collate_fn(samples, image_size: int | None = None, reasoning_mode: str = "fast"):
+def driving_collate_fn(samples, image_size: int | None = None, reasoning_mode: str = "fast", vlm_frames_per_camera: int = NUM_FRAMES):
     """Convert DrivingSample objects into tensors and text prompts.
 
     images shape: [B, NUM_CAMERAS, NUM_FRAMES, C, H, W]
@@ -43,6 +43,8 @@ def driving_collate_fn(samples, image_size: int | None = None, reasoning_mode: s
         temporal fields are absent (old-format data).
     future_waypoints_ego shape: [B, T, 3]  (Δx, Δy, Δθ)
       - If loaded data has [T, 2] rows, Δθ is zero-padded.
+    route_waypoints_ego shape: [B, T, 3]
+      - Route centerline input. Missing old-format data is zero-filled.
     """
     # ── images ─────────────────────────────────────────────────────────────
     images = _build_image_tensor(samples, image_size)
@@ -57,6 +59,7 @@ def driving_collate_fn(samples, image_size: int | None = None, reasoning_mode: s
 
     # ── waypoints [B, T, 3] ─────────────────────────────────────────────────
     waypoints = _build_waypoint_tensor(samples)
+    route_waypoints = _build_route_waypoint_tensor(samples, waypoint_count=int(waypoints.shape[1]))
 
     # ── controls ────────────────────────────────────────────────────────────
     controls = torch.tensor(
@@ -93,8 +96,9 @@ def driving_collate_fn(samples, image_size: int | None = None, reasoning_mode: s
 
     # image_paths: list of current-front paths (for VLMBackbone backward compat)
     image_paths = [str(s.observation.camera_front) for s in samples]
-    # all_image_paths: list of lists — 12 paths per sample (3 cam × 4 frame)
-    all_image_paths = _build_all_image_paths(samples)
+    # all_image_paths: 샘플당 (3 cam × vlm_frames_per_camera) 경로. VLM forward 비용은
+    # 이미지 수에 비례하므로(12장≈3장의 4배), frames_per_camera로 시간축을 줄일 수 있다.
+    all_image_paths = _build_all_image_paths(samples, frames_per_camera=vlm_frames_per_camera)
 
     return {
         "sample_ids": [s.observation.sample_id for s in samples],
@@ -108,6 +112,7 @@ def driving_collate_fn(samples, image_size: int | None = None, reasoning_mode: s
         "reasoning_mode": reasoning_mode,
         "reasoning_targets": reasoning_targets,
         "reasoning_labels": reasoning_labels,
+        "route_waypoints_ego": route_waypoints,
         "future_waypoints_ego": waypoints,
         "controls": controls,
     }
@@ -145,14 +150,38 @@ def _build_waypoint_tensor(samples) -> torch.Tensor:
     return torch.tensor(rows, dtype=torch.float32)
 
 
-def _build_all_image_paths(samples) -> list[list[str]]:
-    """12 image paths per sample in camera-major order."""
+def _build_route_waypoint_tensor(samples, waypoint_count: int) -> torch.Tensor:
+    rows = []
+    for s in samples:
+        route_wps = s.observation.route_waypoints_ego or []
+        rows.append(_normalize_waypoints(route_wps, waypoint_count))
+    return torch.tensor(rows, dtype=torch.float32)
+
+
+def _normalize_waypoints(waypoints: list[list[float]], count: int) -> list[list[float]]:
+    rows: list[list[float]] = []
+    for waypoint in waypoints[:count]:
+        if len(waypoint) >= 3:
+            rows.append([float(waypoint[0]), float(waypoint[1]), float(waypoint[2])])
+        elif len(waypoint) == 2:
+            rows.append([float(waypoint[0]), float(waypoint[1]), 0.0])
+    while len(rows) < count:
+        rows.append([0.0, 0.0, 0.0])
+    return rows
+
+
+def _build_all_image_paths(samples, frames_per_camera: int = NUM_FRAMES) -> list[list[str]]:
+    """(3 cam × frames_per_camera) image paths per sample in camera-major order.
+
+    frames_per_camera=4 → 12장(현재+t1~t3). =1 → 3카메라 현재프레임만(AutoVLA 3캠 유지).
+    """
+    frames_per_camera = max(1, min(int(frames_per_camera), NUM_FRAMES))
     result = []
     for s in samples:
         obs = s.observation
         paths = []
         for cam_row in _CAM_KEYS:
-            for key in cam_row:
+            for key in cam_row[:frames_per_camera]:
                 p: Path | None = getattr(obs, key, None)
                 paths.append(str(p if p is not None else obs.camera_front))
         result.append(paths)
@@ -160,7 +189,7 @@ def _build_all_image_paths(samples) -> list[list[str]]:
 
 
 def _build_prompt(command: str, speed_mps: float) -> str:
-    return "Drive with command=%s at speed=%.2f m/s and predict future ego-frame waypoints." % (
+    return "Drive with command=%s at speed=%.2f m/s, follow route waypoints, and predict future ego-frame waypoints." % (
         command, speed_mps,
     )
 

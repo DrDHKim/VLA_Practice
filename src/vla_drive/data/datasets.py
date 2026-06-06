@@ -50,6 +50,7 @@ class JsonlDrivingDataset(Dataset):
                 camera_front_right_t2=_p("camera_front_right_t2"),
                 camera_front_right_t3=_p("camera_front_right_t3"),
                 route_command=obs.get("route_command", "keep_lane"),
+                route_waypoints_ego=obs.get("route_waypoints_ego"),
                 ego_speed_mps=float(obs.get("ego_speed_mps", 0.0)),
                 ego_accel_mps2=obs.get("ego_accel_mps2"),
                 ego_heading_rad=obs.get("ego_heading_rad"),

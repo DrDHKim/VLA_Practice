@@ -123,8 +123,8 @@ class DummyDrivingBackbone(nn.Module):
 
     Accepts [B, NUM_CAMERAS, NUM_FRAMES, C, H, W] or legacy [B, C, H, W].
     Front-camera current frame is used; remaining views/frames are ignored.
-    Route command is injected as a compact one-hot feature so Mac-scale
-    training remains command-conditioned without loading a full VLM backbone.
+    Route command is injected as a compact one-hot feature. When enabled,
+    route waypoints are also encoded as a compact route-following input.
     """
 
     COMMAND_TO_INDEX = {
@@ -136,9 +136,16 @@ class DummyDrivingBackbone(nn.Module):
         "right": 2,
     }
 
-    def __init__(self, hidden_dim: int = 64) -> None:
+    def __init__(
+        self,
+        hidden_dim: int = 64,
+        use_route_waypoints: bool = False,
+        route_waypoint_count: int = 10,
+    ) -> None:
         super().__init__()
         self.hidden_dim = hidden_dim
+        self.use_route_waypoints = bool(use_route_waypoints)
+        self.route_waypoint_count = int(route_waypoint_count)
         self.image_encoder = nn.Sequential(
             nn.Conv2d(3, 16, kernel_size=3, stride=2, padding=1),
             nn.GELU(),
@@ -147,8 +154,9 @@ class DummyDrivingBackbone(nn.Module):
             nn.AdaptiveAvgPool2d((1, 1)),
             nn.Flatten(),
         )
+        route_feature_dim = self.route_waypoint_count * 3 if self.use_route_waypoints else 0
         self.proj = nn.Sequential(
-            nn.Linear(36, hidden_dim),
+            nn.Linear(36 + route_feature_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.GELU(),
         )
@@ -164,7 +172,10 @@ class DummyDrivingBackbone(nn.Module):
         speed = speed.to(device=images.device, dtype=images.dtype).view(images.shape[0], 1)
         route_features = self._route_command_features(batch, images.shape[0], images.device, images.dtype)
         image_features = self.image_encoder(images)
-        return self.proj(torch.cat([image_features, speed, route_features], dim=1))
+        features = [image_features, speed, route_features]
+        if self.use_route_waypoints:
+            features.append(self._route_waypoint_features(batch, images.shape[0], images.device, images.dtype))
+        return self.proj(torch.cat(features, dim=1))
 
     def _route_command_features(
         self,
@@ -182,3 +193,22 @@ class DummyDrivingBackbone(nn.Module):
             if command_idx is not None:
                 features[row_idx, command_idx] = 1.0
         return features
+
+    def _route_waypoint_features(
+        self,
+        batch: dict,
+        batch_size: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> torch.Tensor:
+        feature_count = self.route_waypoint_count * 3
+        route_waypoints = batch.get("route_waypoints_ego")
+        if route_waypoints is None:
+            return torch.zeros(batch_size, feature_count, device=device, dtype=dtype)
+        route_waypoints = route_waypoints.to(device=device, dtype=dtype)
+        route_waypoints = route_waypoints[:, : self.route_waypoint_count, :3]
+        if route_waypoints.shape[1] < self.route_waypoint_count:
+            pad_count = self.route_waypoint_count - int(route_waypoints.shape[1])
+            padding = torch.zeros(batch_size, pad_count, 3, device=device, dtype=dtype)
+            route_waypoints = torch.cat([route_waypoints, padding], dim=1)
+        return route_waypoints.reshape(batch_size, feature_count)

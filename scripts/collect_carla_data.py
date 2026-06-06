@@ -329,6 +329,37 @@ def _waypoint_frame_offsets(
     return [max(1, int(round(frames_horizon * k / n_future))) for k in range(1, n_future + 1)]
 
 
+def _route_waypoints_from_map(
+    carla_map: Any,
+    carla_module: Any,
+    x: float,
+    y: float,
+    yaw_rad: float,
+    count: int,
+    spacing_m: float,
+) -> list[list[float]]:
+    location = carla_module.Location(x=float(x), y=float(y), z=0.0)
+    waypoint = carla_map.get_waypoint(location, project_to_road=True)
+    route = []
+    for _ in range(max(1, int(count))):
+        next_waypoints = waypoint.next(float(spacing_m))
+        if not next_waypoints:
+            break
+        waypoint = next_waypoints[0]
+        dx, dy, dh = _world_to_ego_delta(
+            float(x),
+            float(y),
+            float(yaw_rad),
+            waypoint.transform.location.x,
+            waypoint.transform.location.y,
+            math.radians(waypoint.transform.rotation.yaw),
+        )
+        route.append([round(dx, 4), round(dy, 4), round(dh, 5)])
+    while route and len(route) < count:
+        route.append(route[-1])
+    return route
+
+
 # ─────────────────────────── path helpers ────────────────────────────────────
 
 def _normalize_output_root(path: Path) -> Path:
@@ -678,6 +709,9 @@ def collect(config: dict[str, Any], output_root: Path | None = None) -> Path:
 
         written = 0
         skipped_low_quality = 0
+        carla_map = world.get_map()
+        route_waypoint_count = int(collect_cfg.get("route_waypoint_count", N_FUTURE))
+        route_waypoint_spacing_m = float(collect_cfg.get("route_waypoint_spacing_m", waypoint_spacing_m))
         with JsonlWriter(metadata_path) as writer:
             for i in range(min_idx, max_idx):
                 f = raw[i]
@@ -711,6 +745,15 @@ def collect(config: dict[str, Any], output_root: Path | None = None) -> Path:
                     lookahead_meters=route_command_lookahead_meters,
                     threshold_rad=route_command_yaw_threshold_rad,
                 )
+                route_wps = _route_waypoints_from_map(
+                    carla_map=carla_map,
+                    carla_module=carla,
+                    x=f["x"],
+                    y=f["y"],
+                    yaw_rad=f["yaw_rad"],
+                    count=route_waypoint_count,
+                    spacing_m=route_waypoint_spacing_m,
+                )
 
                 writer.write({
                     "observation": {
@@ -730,6 +773,7 @@ def collect(config: dict[str, Any], output_root: Path | None = None) -> Path:
                         "camera_front_left_t3": _metadata_path(hist[2]["fl"]),
                         "camera_front_right_t3": _metadata_path(hist[2]["fr"]),
                         "route_command": route_command,
+                        "route_waypoints_ego": route_wps,
                         "ego_position": {
                             "x": round(f["x"], 4),
                             "y": round(f["y"], 4),

@@ -50,3 +50,5 @@ collection:
   max_sample_brake: 1.0
   route_length: 120
   waypoint_spacing_m: 2.0  # used only when use_fixed_path=true
+  route_waypoint_count: 10
+  route_waypoint_spacing_m: 2.0

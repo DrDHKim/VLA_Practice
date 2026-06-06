@@ -18,6 +18,7 @@ ARGS=(
   --batch-size "${BATCH_SIZE:-2}"
   --num-workers "${NUM_WORKERS:-0}"
   --image-size "${IMAGE_SIZE:-64}"
+  --vlm-frames-per-camera "${VLM_FRAMES_PER_CAMERA:-4}"
   --max-samples "${MAX_SAMPLES:-10}"
   --device "${DEVICE:-auto}"
   --lr "${LR:-1e-3}"
@@ -49,6 +50,10 @@ fi
 
 if [[ -n "${TOKENIZER_PATH:-}" ]]; then
   ARGS+=(--tokenizer-path "$TOKENIZER_PATH")
+fi
+
+if [[ "${USE_ROUTE_WAYPOINTS:-0}" == "1" || "${USE_ROUTE_WAYPOINTS:-0}" == "true" ]]; then
+  ARGS+=(--use-route-waypoints)
 fi
 
 if [[ -n "${RESUME_FROM:-}" ]]; then

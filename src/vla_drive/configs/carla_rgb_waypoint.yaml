@@ -50,4 +50,6 @@ collection:
   max_sample_brake: 1.0
   route_length: 80
   waypoint_spacing_m: 2.0
+  route_waypoint_count: 10
+  route_waypoint_spacing_m: 2.0
   future_waypoint_count: 8

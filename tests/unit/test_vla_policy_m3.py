@@ -42,6 +42,27 @@ def test_dummy_backbone_is_route_command_conditioned() -> None:
     assert not torch.allclose(hidden[0], hidden[1])
 
 
+def test_dummy_backbone_can_use_route_waypoints() -> None:
+    backbone = DummyDrivingBackbone(hidden_dim=16, use_route_waypoints=True, route_waypoint_count=2)
+    base_batch = {
+        "images": torch.zeros(2, 3, 32, 32),
+        "ego_speed_mps": torch.tensor([3.0, 3.0]),
+        "route_commands": ["lane_follow", "lane_follow"],
+        "route_waypoints_ego": torch.tensor(
+            [
+                [[2.0, 0.0, 0.0], [4.0, 0.0, 0.0]],
+                [[2.0, 1.0, 0.0], [4.0, 1.0, 0.0]],
+            ],
+            dtype=torch.float32,
+        ),
+    }
+
+    hidden = backbone.encode(base_batch)
+
+    assert hidden.shape == (2, 16)
+    assert not torch.allclose(hidden[0], hidden[1])
+
+
 @pytest.mark.slow
 def test_vlm_backbone_frozen_encode_shape(tmp_path) -> None:
     """Smoke test: VLMBackbone loads Qwen2.5-VL-3B and encodes one image."""

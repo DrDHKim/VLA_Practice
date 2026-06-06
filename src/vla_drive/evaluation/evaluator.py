@@ -133,6 +133,7 @@ def _build_model_for_checkpoint(
             num_tokens=tokenizer.num_tokens,
             hidden_dim=hidden_dim,
             waypoint_count=waypoint_count,
+            use_route_waypoints=bool(checkpoint_args.get("use_route_waypoints", False)),
         ).to(device)
         return model, tokenizer
     if stage == "reasoning_aux":
@@ -140,10 +141,15 @@ def _build_model_for_checkpoint(
             hidden_dim=hidden_dim,
             waypoint_count=waypoint_count,
             num_reasoning_labels=int(checkpoint_args.get("num_reasoning_labels", 4)),
+            use_route_waypoints=bool(checkpoint_args.get("use_route_waypoints", False)),
         ).to(device)
         return model, None
     if stage == "dummy_overfit":
-        model = build_dummy_policy(hidden_dim=hidden_dim, waypoint_count=waypoint_count).to(device)
+        model = build_dummy_policy(
+            hidden_dim=hidden_dim,
+            waypoint_count=waypoint_count,
+            use_route_waypoints=bool(checkpoint_args.get("use_route_waypoints", False)),
+        ).to(device)
         return model, None
     if stage in {"frozen_vlm", "lora_vlm"}:
         model = build_vlm_policy(

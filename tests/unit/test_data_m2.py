@@ -27,6 +27,7 @@ def test_jsonl_dataset_resolves_relative_image_paths_and_collates(tmp_path) -> N
                     "timestamp": float(idx),
                     "camera_front": f"images/frame_{idx:05d}.png",
                     "route_command": "lane_follow",
+                    "route_waypoints_ego": [[float(t + 1), 0.5, 0.0] for t in range(8)],
                     "ego_speed_mps": 3.0 + idx,
                 },
                 "target": {
@@ -49,5 +50,7 @@ def test_jsonl_dataset_resolves_relative_image_paths_and_collates(tmp_path) -> N
     batch = next(iter(loader))
     assert tuple(batch["images"].shape) == (2, 3, 4, 3, 8, 8)
     assert tuple(batch["future_waypoints_ego"].shape) == (2, 8, 3)
+    assert tuple(batch["route_waypoints_ego"].shape) == (2, 8, 3)
+    assert float(batch["route_waypoints_ego"][0, 0, 0]) == 1.0
     assert tuple(batch["controls"].shape) == (2, 3)
     assert batch["prompts"][0].startswith("Drive with command=lane_follow")

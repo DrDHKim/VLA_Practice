@@ -29,6 +29,9 @@ def _route_records(report: dict) -> list[dict]:
             row["route_completion"] = route.get("route_completion", 0.0)
             row["driving_score"] = route.get("driving_score", 0.0)
             row["failure_reason"] = route.get("failure_reason")
+            row["warmup_seconds"] = route.get("warmup_seconds", 0.0)
+            row["warmup_target_speed_mps"] = route.get("warmup_target_speed_mps", 0.0)
+            row["post_warmup_speed_mps"] = route.get("post_warmup_speed_mps", 0.0)
             rows.append(row)
     return rows
 
@@ -97,19 +100,33 @@ def _render_frame(frame: np.ndarray, record: dict, report: dict, index: int, tot
     brake = float(record.get("brake", 0.0))
     reasoning = record.get("reasoning") or "N/A"
     route_command = record.get("route_command") or report.get("route_command") or "N/A"
+    route_wp_used = bool(record.get("route_waypoints_used", False))
+    warmup_seconds = float(record.get("warmup_seconds", 0.0))
+    warmup_target_speed = float(record.get("warmup_target_speed_mps", 0.0))
+    post_warmup_speed = float(record.get("post_warmup_speed_mps", 0.0))
     head_outputs = record.get("head_outputs", {})
+    action_tokens = record.get("action_token_ids", []) or head_outputs.get("action_head", []) or []
+    policy_type = record.get("policy_type") or report.get("policy_type") or "regression"
     pred_wp = record.get("pred_waypoints_ego", []) or head_outputs.get("waypoint_head", []) or []
     route_wp = record.get("route_waypoints_ego", []) or []
 
+    phase = str(record.get("phase", "policy"))
+    if phase == "warmup":
+        phase_line = ("phase=WARM-UP (forced throttle)", (80, 200, 255))
+    else:
+        phase_line = ("phase=policy after warmup" if warmup_seconds > 0 else "phase=policy", (120, 255, 170))
+
     lines = [
         (f"route={record.get('route_id')} tick={record.get('tick')} frame={index + 1}/{total}", (245, 245, 245)),
-        (f"cmd={route_command}", (210, 230, 255)),
+        phase_line,
+        (f"warmup={warmup_seconds:.1f}s target={warmup_target_speed:.1f} m/s post={post_warmup_speed:.2f} m/s", (120, 255, 170)),
+        (f"cmd={route_command}  route_wp_input={'on' if route_wp_used else 'off'}", (210, 230, 255)),
         (f"speed={speed:.3f} m/s  accel={accel:.3f} m/s2", (245, 245, 245)),
         (f"steer={steer:+.3f}  throttle={throttle:.3f}  brake={brake:.3f}", (245, 245, 245)),
-        (f"reasoning_head={reasoning}", (120, 220, 255) if reasoning != "slow_or_stop" else (80, 120, 255)),
+        (f"policy={policy_type} reasoning={str(reasoning)[:46]}", (120, 220, 255) if reasoning != "slow_or_stop" else (80, 120, 255)),
         (f"waypoint_head[0]={_fmt_wp(pred_wp, 0)}", (255, 230, 120)),
         (f"waypoint_head[-1]={_fmt_wp(pred_wp, -1)}", (255, 230, 120)),
-        ("action_head=N/A for reasoning_aux", (170, 170, 170)),
+        (f"action_tokens={action_tokens[:10] if action_tokens else 'N/A'}", (210, 190, 255)),
         (f"route_completion={float(record.get('route_completion', 0.0)) * 100:.2f}%  driving_score={float(record.get('driving_score', 0.0)) * 100:.2f}%", (245, 245, 245)),
         (f"failure={record.get('failure_reason')}", (120, 120, 255)),
     ]

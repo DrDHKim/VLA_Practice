@@ -3,8 +3,28 @@ from __future__ import annotations
 import math
 from types import SimpleNamespace
 
-from vla_drive.simulation.route_command import Pose2D, route_command_from_poses, select_lookahead_index
+from vla_drive.simulation.route_command import (
+    Pose2D,
+    route_command_from_poses,
+    route_command_from_road_option,
+    select_lookahead_index,
+)
 from vla_drive.simulation.route_planner import RoutePlanner
+
+
+def test_route_command_from_road_option_maps_carla_options() -> None:
+    # Enum-like member with a .name attribute (CARLA agents RoadOption).
+    left = SimpleNamespace(name="LEFT")
+    right = SimpleNamespace(name="RIGHT")
+    assert route_command_from_road_option(left) == "turn_left"
+    assert route_command_from_road_option(right) == "turn_right"
+    # Straight / lane-follow / lane-change collapse to lane_follow.
+    assert route_command_from_road_option("STRAIGHT") == "lane_follow"
+    assert route_command_from_road_option("LANEFOLLOW") == "lane_follow"
+    assert route_command_from_road_option("CHANGELANELEFT") == "lane_follow"
+    # Unknown / VOID falls back.
+    assert route_command_from_road_option("VOID") == "lane_follow"
+    assert route_command_from_road_option("MYSTERY", fallback="lane_follow") == "lane_follow"
 
 
 def test_route_command_uses_carla_left_handed_yaw_sign() -> None:

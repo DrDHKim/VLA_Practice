@@ -1,9 +1,0 @@
-{
-  "ade": 3.265221359729767,
-  "checkpoint_path": "checkpoints/m4_dummy/latest.pt",
-  "collision_proxy_rate": 0.6533333333333333,
-  "fde": 6.072757939894994,
-  "metadata_path": "/private/tmp/vla_drive_carla/m1_smoke/metadata.jsonl",
-  "route_deviation": 1.1676926672707002,
-  "sample_count": 300
-}

@@ -1950,3 +1950,204 @@ Driving evaluation table:
 - 그러나 현재 모델은 closed-loop 시작 상태에서 `slow_or_stop`만 출력하고 throttle을 0으로 유지한다.
 - open-loop ADE/FDE는 감소했지만 closed-loop에서는 정지 policy로 붕괴한다. 다음 개선은 stop/start 불균형, speed-conditioned waypoint label, 초기 정지 상태에서 출발해야 하는 샘플 보강, 또는 control head 직접 학습을 우선 확인해야 한다.
 - Mac CrossOver CARLA는 map reload 후 streaming timeout이 자주 발생했다. `CARLA_TOWN=current`로 현재 world를 재사용하면 learned 1-route sanity는 성공했다.
+
+2026-06-04 전진 불가 원인 분석과 control horizon 조정:
+
+- Town01 learned eval에서 route waypoint는 첫 점부터 약 2m 앞이었지만, 모델 `waypoint_head[-1].x` 평균은 거의 0m였다.
+- 100-scene 학습 데이터의 `speed < 0.5m/s` 샘플은 GT final waypoint가 거의 0m이고 brake 평균이 0.99라서, 정지 입력은 "출발"보다 "계속 정지"로 학습됐다.
+- 같은 CARLA frame에 speed만 바꿔 넣으면 speed 3m/s 이상에서 `keep_lane`과 큰 forward waypoint가 나오므로 warm-up은 타당한 평가 우회다.
+- 추가로 learned eval의 waypoint-to-control adapter가 `final_x / horizon_seconds`로 desired speed를 계산하므로, 5s horizon은 moving prediction에서도 brake를 유발할 수 있다.
+- `launchers/05_평가.command`에 `POLICY_HORIZON_SECONDS`를 추가하고 learned eval 기본값을 2.0s로 설정했다.
+- learned eval 시작 전에 policy control을 적용하지 않는 warm-up 구간을 추가했다. 기본값은 `LEARNED_WARMUP_TARGET_SPEED_MPS=3.0`, `LEARNED_WARMUP_SECONDS=8.0`, `LEARNED_WARMUP_THROTTLE=0.7`이며, 3m/s에 도달하거나 최대 시간이 지나면 policy 평가를 시작한다. route completion은 warm-up 이후 위치부터 계산한다.
+- `launchers/05_평가.command`만 실행해도 이 설정을 검증할 수 있도록 기본 `EVAL_MODE`를 `learned_closed_loop`, checkpoint를 command-conditioned best checkpoint, route count를 1, CARLA timeout을 90s로 맞췄다.
+- `launchers/05_평가.command` 시작 시 `127.0.0.1:2000`이 이미 열려 있으면 실행 중인 CARLA를 그대로 쓰고, 닫혀 있으면 `launchers/01_카를라실행.command`를 자동 실행한 뒤 기다리게 했다.
+- learned HUD에 `phase=policy after warmup`, warm-up duration, target speed, post-warmup speed를 표시하게 했다.
+- `launchers/05_평가.command` 상단을 사용자 입력값 중심으로 재정리했다. spawn index, 평가 시간, completion 목표 거리, route command, warm-up target/throttle, checkpoint, output directory를 상단에서 바로 조정한다.
+
+2026-06-04 route waypoint conditioned policy 구현:
+
+- 기존 learned eval은 `route_waypoints_ego`를 HUD 비교용으로만 저장했고, 모델 입력은 RGB + ego speed + route command였다.
+- `Observation.route_waypoints_ego`와 collate tensor `batch["route_waypoints_ego"]`를 추가해 route centerline waypoint를 모델 입력으로 전달할 수 있게 했다.
+- CARLA 수집 metadata에 map waypoint 기반 `observation.route_waypoints_ego`를 저장한다. 이는 `target.future_waypoints_ego`와 분리된 route input이다.
+- 기존 Town01 100-scene metadata를 재수집하지 않고 쓸 수 있도록 `scripts/backfill_route_waypoints.py`와 CrossOver wrapper `scripts/backfill_route_waypoints.sh`를 추가했다. 기본 출력은 `tmp/m10d_final/metadata_scene_balanced_100_routewp_town01.jsonl`이다.
+- `client.load_world("Town01")`는 CrossOver CARLA에서 streaming connection refused로 서버를 죽일 수 있어, backfill wrapper 기본 town은 `current`로 둔다. 01 launcher가 Town01로 CARLA를 띄운 뒤 current map에서 backfill한다.
+- `launchers/03_학습.command`는 route-wp metadata가 없고 raw metadata가 있으면 01 launcher를 자동 실행하고 backfill을 먼저 수행한 뒤 학습한다.
+- `DummyDrivingBackbone(use_route_waypoints=True)`는 route waypoint tensor를 flatten해 image/speed/route-command feature와 함께 projection한다.
+- `--use-route-waypoints` 학습 옵션과 `USE_ROUTE_WAYPOINTS=1` launcher 기본값을 추가했다. route-conditioned checkpoint는 `checkpoints/m10d_final_routewp_reasoning_aux_balanced`에 저장한다.
+- learned closed-loop eval은 CARLA map에서 계산한 route wp를 policy server 요청에 포함한다. checkpoint가 `use_route_waypoints=True`로 학습된 경우 실제 모델 입력으로 사용된다.
+- HUD는 `route_wp_input=on/off`를 표시한다. 기존 checkpoint로 평가하면 off, route-wp checkpoint로 평가하면 on이다.
+
+2026-06-04 route waypoint backfill map 정합성 보강:
+
+- 리소스 점검 중 `tmp/m10d_final/metadata_scene_balanced_100_routewp_town01.jsonl`의 `route_waypoint_source.map_name`이 `Carla/Maps/Town10HD_Opt`로 기록된 것을 확인했다.
+- 같은 샘플의 GT future waypoint는 2m대부터 시작하지만 잘못 backfill된 route waypoint는 80m대부터 시작해 학습 라벨로 사용할 수 없는 상태였다.
+- 잘못된 route-wp 라벨로 진행 중이던 학습 프로세스는 중단했다.
+- `launchers/03_학습.command`의 route waypoint backfill 기본 town을 `Town01`로 되돌리고, 기존 metadata가 요청 town과 다르면 `.bad_map_YYYYmmdd_HHMMSS`로 격리 후 재생성하게 했다.
+- `scripts/backfill_route_waypoints.py`는 요청한 town과 실제 CARLA map이 다르면 파일을 쓰기 전에 실패하도록 검증을 추가했다.
+- MacBook 학습 리소스 점검 결과 route-wp reasoning_aux 학습은 모델 메모리 사용량이 약 0.5GB 수준이고 CPU idle이 남아 있었다.
+- DataLoader worker를 늘릴 수 있도록 lambda collate를 top-level callable class로 바꾸고, 03 launcher 기본값을 `BATCH_SIZE=64`, `NUM_WORKERS=2`, `LOG_EVERY=10`으로 조정했다.
+- `num_workers=2`, `batch_size=64`, `max_samples=128` dry run은 2 step 정상 종료했다.
+
+2026-06-04 route waypoint 입력 범위 재정리:
+
+- AutoVLA notes와 현재 baseline 문서는 모델 입력을 multi-view/multi-frame RGB, ego state, navigation instruction/route command로 정의한다.
+- Raw/local `route_waypoints_ego`를 numeric model input으로 넣는 것은 알고리즘 충실 구현이 아니라 planner prior를 추가한 ablation이다.
+- 진행 중이던 route-conditioned 학습은 epoch 1 step 260에서 중단했다.
+- `launchers/03_학습.command`의 기본 `USE_ROUTE_WAYPOINTS`는 `0`으로 되돌렸다. route waypoint metadata는 HUD, route adherence 분석, closed-loop 비교, ablation 옵션으로 남긴다.
+- `launchers/03_학습.command`는 command-only 기본값일 때 raw metadata와 `m10d_final_reasoning_aux_balanced` checkpoint/log 경로를 사용한다. route-wp 경로는 `USE_ROUTE_WAYPOINTS=1` ablation일 때만 사용한다.
+- learned closed-loop eval은 global path에서 local route waypoint를 계산하되, 이를 모델 numeric input으로 쓰지 않고 tick별 `route_command` 생성과 HUD/metadata 기록에 사용한다.
+- policy inference server도 command-only checkpoint에서는 `route_waypoints_ego` batch field를 만들지 않고, checkpoint args의 `use_route_waypoints=True`일 때만 ablation input으로 전달한다.
+
+2026-06-04 repo 산출물 정리:
+
+- `.DS_Store`, Python cache, pytest/ruff/matplotlib cache를 repo 작업 트리에서 제거했다.
+- `tmp/train_worker_check_*` 1회성 worker dry-run 산출물과 잘못 생성된 Town10 route-wp backfill 파일을 제거했다.
+- `outputs/reports/learned_closed_loop/`의 오래된 날짜별 run 4개를 제거하고 최신 run 1개만 남겼다.
+- smoke report/checkpoint/log 산출물(`m10d_action_token_smoke`, `m10d_reasoning_aux_smoke`)을 제거했다.
+- `outputs/reports/m10d_current_prediction_examples/`, `outputs/reports/m10d_scene_quality/`, `scene_031_contact_sheet.png` 등 1회성 분석 산출물을 제거했다.
+- checkpoint는 현재 기본 command-only 평가 후보인 `checkpoints/m10d_final_cmd_reasoning_aux_balanced/`만 남기고 smoke/current/tune/route-wp ablation checkpoint를 제거했다.
+- 기존 tracked `outputs/reports/*.json` 결과 파일을 제거 대상에 포함하고, 새 report 산출물이 다시 git에 잡히지 않도록 `.gitignore`에 `outputs/reports/`를 추가했다.
+- `tmp/m10d_current/`와 `tmp/m10d_final/metadata_snapshot_100_scenes.jsonl` 과거 metadata snapshot을 제거했다. 현재 기본 command-only 학습/평가는 `tmp/m10d_final/metadata_scene_balanced_100.jsonl`을 사용한다.
+
+2026-06-04 VLA 아키텍처 방향 결정 (진짜 AutoVLA로 전환, M4는 PoC만):
+
+- 현재 `frozen_vlm`/`lora_vlm`(`build_vlm_policy`→`VLADrivingPolicy`)은 Qwen2.5-VL-3B 마지막 hidden state를 mean-pool한 뒤 MLP waypoint head로 궤적을 회귀한다. VLM을 frozen feature extractor로만 쓰고 추론 텍스트 생성도, 자기회귀 action token 생성도 없다 → AutoVLA 충실 구현이 아니라 단순화 버전이다.
+- AutoVLA 원안: VLM이 멀티뷰 이미지+명령을 받아 chain-of-thought 추론 텍스트를 생성하고, 이어 궤적을 이산 action token으로 자기회귀 생성한다(행동이 LM 디코더 출력의 일부). 학습은 SFT(+RL).
+- 결정: (B) 진짜 AutoVLA 방식으로 간다. 데이터를 `명령+이미지 → (추론 텍스트 + action token열)` instruction 시퀀스로 구성하고, VLM(LoRA)을 next-token loss로 학습해 추론+행동 토큰을 생성하게 하며, 추론 시 generate로 토큰을 뽑아 궤적을 디코드한다. 이 생성 경로(데이터 포맷·loss·inference)는 아직 미구현이며 다음 작업이다.
+- 리소스: 현재 머신 Apple M4 / 32GB / MPS. frozen Qwen2.5-VL-3B forward 실측 — 단일 이미지 0.48 samp/s(배치 1/2/4/8 모두 평평 = MPS compute-bound, 메모리 9~10GB 여유), 12-view(3캠×4프레임) 28.5s/샘플(0.04 samp/s, 14.3GB). batch를 키워도 throughput이 안 늘어 "리소스 최대화"로 속도를 못 올린다. generate는 forward보다 더 비싸다.
+- 따라서 M4에서는 진짜 AutoVLA 본학습이 비현실적이다(12-view 풀학습 추정 ~633시간). M4는 데이터 포맷/학습 파이프라인 검증용 소규모 PoC만 수행하고, 본학습은 GPU(H100/RTX5090)에서 한다.
+- M4 PoC 절충: AutoVLA 3카메라는 유지하되 시간축을 1프레임으로 줄여 샘플당 3장만 VLM에 넣는다. `collate.driving_collate_fn`에 `vlm_frames_per_camera`(기본 4=12장 하위호환, 1=3장) 옵션을 추가하고 `_build_all_image_paths(frames_per_camera)`로 슬라이스한다. `--vlm-frames-per-camera` 학습 인자와 `VLM_FRAMES_PER_CAMERA` launcher 변수로 연결했다.
+- `launchers/03_학습.command` 기본 STAGE를 `frozen_vlm`으로 두고, STAGE별 분기를 추가해 VLM 스테이지에서는 route_waypoints/reasoning head를 쓰지 않고 명령을 프롬프트 텍스트로 전달한다. M4 PoC 기본값은 `VLM_FRAMES_PER_CAMERA=1`, `MAX_SAMPLES=1500`, `EPOCHS=3`, `BATCH_SIZE=4`, `LR=5e-4`이며 checkpoint/log는 `checkpoints|outputs/logs/m10d_final_frozen_vlm`이다.
+- 주의: 현재 `frozen_vlm`은 여전히 회귀 head 방식이다. 진짜 AutoVLA(추론텍스트+action token 자기회귀 생성)는 별도 구축이 필요하며, 위 03 설정은 그 PoC를 위한 발판이다. 학습에는 `/Volumes/DATASET` 마운트가 필요하다(현재 미마운트).
+
+2026-06-04 LoRA-VLA(진짜 AutoVLA) PoC 1단계 — instruction 데이터 포맷터:
+
+- PoC 설계 확정: action=스페셜 토큰 `<act_i>`, 추론=템플릿 합성, 코드북 K=256, 이미지=3카메라 현재프레임, 모델=lora_vlm(생성 학습). frozen+회귀 head로는 토큰 생성이 불가하므로 PoC는 사실상 lora_vlm이다.
+- `src/vla_drive/data/autovla_format.py` 추가: DrivingSample → SFT 예시 `{prompt, completion, image_paths, reasoning, action_token_ids}`.
+  - completion = 추론 문장 + ` Trajectory: ` + `<act_i>`×waypoint_count. `TrajectoryActionTokenizer.encode`로 궤적[10×3]→10토큰.
+  - `encode_action_text`/`parse_action_text`(정규식 라운드트립), `action_special_tokens(K)`(LM 토크나이저에 등록할 스페셜 토큰 목록) 제공.
+  - 추론 텍스트는 command/speed/brake 규칙 템플릿(데이터에 CoT가 없어 teacher 증류 대체). explicit reasoning이 있으면 우선 사용.
+  - 프롬프트 라벨 마스킹(assistant 구간만 loss)은 2단계 학습 collator에서 처리.
+- `scripts/build_autovla_dataset.py` 추가: 메타데이터 → tokenizer fit → 예시 JSONL + `.codebook.json` + `.special_tokens.json` 저장.
+- 검증: 단위테스트 `tests/unit/test_autovla_format.py` 3개 통과(토큰 라운드트립/추론 템플릿/예시 구조). 실제 메타데이터 500샘플 dry-run 정상 — 예) `lane_follow 4.9 m/s` → "…cruising at 4.9 m/s; following the current lane… Trajectory: <act_1>…<act_154>"(10토큰). 포맷터/빌더는 경로만 쓰므로 `/Volumes/DATASET` 미마운트로도 동작.
+- 다음 2단계(lora_vlm 생성 학습): Qwen 토크나이저에 action 스페셜 토큰 등록 + 임베딩/lm_head 학습 포함, chat 포맷 + 프롬프트 라벨 마스킹 next-token loss. 3단계: `generate`로 토큰 생성 → 궤적 디코드 → eval/HUD 연결. 본학습은 GPU, M4는 소규모 PoC.
+
+2026-06-04 LoRA-VLA PoC 2단계 — 토큰 등록 + chat 라벨 마스킹 collator:
+
+- Qwen2.5-VL-3B 토크나이저에 `<act_i>` 스페셜 토큰 등록 검증: 256개 추가 시 base vocab 151665→151921, 각 `<act_i>`가 **단일 token id**로 매핑(5 action→5 token), decode→parse 라운드트립 정확. resize_token_embeddings는 학습 스크립트에서 호출 예정.
+- `src/vla_drive/data/autovla_sft.py` 추가:
+  - `register_action_tokens(tokenizer, K)` — 스페셜 토큰 등록(추가 개수 반환).
+  - `build_chat_messages(prompt, completion, num_images)` — full(user[이미지×N+텍스트]+assistant[completion]) / prompt-only 메시지 쌍.
+  - `mask_prompt_prefix(input_ids, prompt_len)` — 프롬프트 구간을 `-100`으로 마스킹.
+  - `AutoVLASFTCollator(processor)` — full/prompt를 chat 템플릿+processor로 토크나이즈해 `input_ids/labels/pixel_values` 생성. prompt(이미지 포함) prefix 길이로 labels 마스킹, padding도 -100. (런타임에 이미지 픽셀 필요.)
+- 검증: `tests/unit/test_autovla_sft.py` 3개 통과(마스킹/메시지 구조/토큰 등록). 단위테스트 누계 6개(format 3 + sft 3) 통과. 텍스트/마스킹 로직은 이미지 없이 검증, 멀티모달 collate 런타임은 `/Volumes/DATASET` 마운트 필요.
+- 남은 작업: (2-b) `scripts/train_autovla_lora.py` — Qwen2.5-VL 로드 + 스페셜토큰 resize + LoRA(+embed/lm_head trainable) + 위 collator로 next-token SFT. (3) generate 추론→`parse_action_text`→tokenizer.decode로 궤적 복원→eval/HUD. 둘 다 실제 실행은 GPU/데이터 마운트 필요(M4는 소규모 PoC만).
+
+2026-06-04 LoRA-VLA PoC 2-b·3단계 — 생성 학습 스크립트 + 추론 디코드 (골격; 실학습은 GPU/마운트 필요):
+
+- `training/lora.apply_lora`에 `modules_to_save` 인자 추가. AutoVLA 학습 시 `["embed_tokens","lm_head"]`를 full 학습해 새 `<act_i>` 토큰 임베딩/출력 행을 실제로 학습한다.
+- `scripts/train_autovla_lora.py` 추가: instruction JSONL+codebook → Qwen2.5-VL 로드 → `register_action_tokens` + `resize_token_embeddings` → `apply_lora(+embed/lm_head)` → `AutoVLASFTCollator`로 next-token SFT(`model(**batch).loss`) → adapter/processor/codebook/summary 저장. 기본 batch_size=1·grad_accum=4(VLM 메모리).
+- `src/vla_drive/models/autovla_generate.py` 추가: `decode_trajectory_from_text`(생성텍스트→parse→tokenizer.decode→[T,3], 순수·테스트가능), `load_autovla`(base+LoRA adapter+processor+codebook), `generate_trajectory`(prompt-only chat→`model.generate`→디코드).
+- 검증: `tests/unit/test_autovla_generate.py` 2개 포함 AutoVLA 단위테스트 8개 통과, 전체 33개 통과, 관련 파일 컴파일 OK. 실제 학습/generate는 3B VLM+이미지라 GPU/`/Volumes/DATASET` 마운트에서만 실행(여기선 미실행).
+- 실행 절차(데이터/GPU 준비 시):
+  1) `python scripts/build_autovla_dataset.py --metadata-path tmp/m10d_final/metadata_scene_balanced_100.jsonl --output-path tmp/autovla/train.jsonl --num-tokens 256 --frames-per-camera 1`
+  2) `python scripts/train_autovla_lora.py --instruction-path tmp/autovla/train.jsonl --codebook-path tmp/autovla/train.codebook.json --output-dir checkpoints/m10d_autovla_lora --num-tokens 256 [--max-samples N]`
+  3) `autovla_generate.generate_trajectory(...)`로 추론 후 기존 waypoint_control 어댑터로 CARLA 평가 연결(eval 통합은 후속).
+- 미해결/후속: M4 단일 step generation SFT 실측, eval(`serve`/05) 경로에 generate 모델 연결, 추론 텍스트 teacher 증류 품질 개선.
+
+2026-06-04 LoRA-VLA PoC 실학습 스모크 검증 + 전용 런처:
+
+- `/Volumes/DATASET` 마운트 확인 후 실제 학습 스모크 수행(2~4샘플, 1~2 epoch): Qwen2.5-VL 로드 → action 토큰 16개 등록·임베딩 resize → LoRA(+embed/lm_head) → 실이미지 `AutoVLASFTCollator` → `model(**batch).loss` → backward → adapter 저장까지 **엔드투엔드 정상 동작** 확인.
+- 버그 발견·수정: MPS에서 `dtype=float16`로 학습 시 step 2부터 loss=NaN(fp16 backward 불안정). `train_autovla_lora.py` 학습 dtype을 MPS/CPU=fp32, CUDA=bf16으로 변경하니 loss 7.09→6.20로 유한·감소 확인. inference dtype도 CUDA만 fp16, 그 외 fp32로 정리.
+- 성능: M4 fp32에서 3카메라(3장) 기준 step당 수십 초로 느리다. 따라서 M4는 `MAX_SAMPLES` 작은 PoC만, 본학습은 GPU.
+- `launchers/07_AutoVLA학습.command` 추가: (1) instruction 데이터셋 생성(없거나 `REBUILD_DATASET=1`) → (2) `train_autovla_lora.py` 실행. `.conda` MPS 파이썬으로 돈다(CrossOver 아님). M4 PoC 기본값 `NUM_TOKENS=256`, `FRAMES_PER_CAMERA=1`, `MAX_SAMPLES=48`, `EPOCHS=2`, `BATCH_SIZE=1`, `GRAD_ACCUM_STEPS=4`, `LR=1e-4`, `LORA r/a=8/16`, 출력 `checkpoints/m10d_autovla_lora`. 첫 샘플 이미지 경로로 마운트 여부도 점검.
+- 03_학습.command(frozen_vlm=특징추출+회귀 head)과 07_AutoVLA학습.command(진짜 생성 VLA)은 다른 파이프라인임을 명확히 분리했다.
+
+2026-06-05 AutoVLA LoRA 학습 하이퍼파라미터 M4 실측 튜닝:
+
+- 목표: 이 MacBook(M4/32GB/MPS)에서 GPU(MPS)·통합메모리를 최대 활용하도록 AutoVLA LoRA 학습 파라미터 튜닝.
+- 실측(fp32, batch=1, 3카메라 현재프레임, trainable 626M=full embed+lm_head+LoRA):
+  - 이미지 원본(seqlen 1006) = 103s/step, 384²(seqlen 697) = 98s/step, 224²(seqlen 301) = 24s/step.
+  - 메모리는 세 경우 모두 약 44~45GB로 보고됨(32GB 초과 → MPS 스왑). 그래도 크래시 없이 동작.
+- 결론:
+  - **이미지 해상도가 속도 지배 인자.** 224로 줄이면 ~4배 빠름(vision token 수 ↓). 본격 학습 전 image_size를 낮추는 게 M4 최대 레버.
+  - **배치는 의미 없음**(MPS compute-bound: 앞 forward 벤치에서도 throughput 평평). batch=1 고정, effective batch는 grad_accum으로.
+  - **fp32 필수**(fp16=NaN). 메모리는 trainable 626M(full embed/lm_head)+fp32가 지배해 이미 포화(스왑) → "VRAM을 더 채워 가속"은 불가, 이미 한계. 대규모는 GPU가 정답.
+- `launchers/07_AutoVLA학습.command` 기본값 갱신: `IMAGE_SIZE=224`(0=원본 느림), `MAX_SAMPLES=150`, `EPOCHS=2`, `BATCH_SIZE=1`, `GRAD_ACCUM_STEPS=4`, `LR=1e-4`, `LORA r/a=8/16`. 예상 소요 ≈ MAX_SAMPLES×EPOCHS×24s(@224) → 150×2 ≈ 2시간.
+- 후속(메모리 완화): full embed/lm_head 대신 신규 토큰 행만 학습하면 trainable/옵티마이저 메모리를 크게 줄여 스왑을 없앨 수 있다(현재 미구현, 안정성 문제 시 적용).
+
+2026-06-05 AutoVLA LoRA PoC 첫 실학습 완료 + 추론 점검:
+
+- `07_AutoVLA학습.command`(IMAGE_SIZE=224, MAX_SAMPLES=150, EPOCHS=2)로 첫 실학습 완료: 300 step, loss 7 → 0.03(best 0.027). 체크포인트 `checkpoints/m10d_autovla_lora/`에 adapter/processor/tokenizer/codebook/summary 저장됨.
+- 주의: 150샘플·2epoch + 템플릿(결정론) 추론 + 저엔트로피 action 토큰이라 **loss가 0.03까지 떨어진 것은 과적합 신호**이지 주행 품질 지표가 아니다. 의미있는 평가엔 더 많은 데이터 + held-out + closed-loop가 필요.
+- `scripts/autovla_generate_smoke.py` 추가(체크포인트 로드→실샘플 generate→추론문장/action토큰/디코드 궤적 vs GT 출력). `load_autovla`로 base+adapter+processor+codebook 로드는 정상 확인.
+- 그러나 generate 실행 시점에 `/Volumes/DATASET`가 다시 언마운트되어 이미지 로드 실패 → generate 스모크는 **마운트 복구 후 재실행 필요**. 실행: `.conda/bin/python scripts/autovla_generate_smoke.py --sample-index <존재하는 idx>`.
+- 다음: (재마운트 후) generate 스모크로 "추론문장+action토큰 생성→궤적 디코드" 확인 → 데이터/샘플 확대 → eval(05/serve) 연결.
+
+2026-06-05 AutoVLA generate 스모크 — 파이프라인 동작 확인 + mode collapse:
+
+- DATASET 재마운트 후 `autovla_generate_smoke.py`로 실샘플 5개 생성 성공: 추론문장 + `Trajectory:` + action 토큰 + 궤적 디코드까지 **엔드투엔드 동작 확인**(진짜 AutoVLA 생성 경로 검증 완료). 추론문장이 프롬프트 속도를 반영(4.9/4.3/5.2 m/s 각기 다름).
+- 그러나 모든 샘플에서 action 토큰이 `<act_4>`만 9회 반복으로 **mode collapse**. 입력 조건에 따른 다른 궤적을 못 냄. 원인: 학습 150샘플이 거의 lane_follow 순항(직진)이고 action 분포가 저엔트로피라, 모델이 다수 패턴 하나로 수렴(앞서 본 loss 0.03 과적합과 일치).
+- 부차 관찰: EOS가 1토큰 일찍 나와 10개 중 9개만 생성(`<|im_end|>`). pred(9)≠GT(10)로 ADE 미산출 — generate를 waypoint_count로 맞추거나 decode에서 길이 보정 필요(소소).
+- 결론: 배선·생성·디코드는 검증됨. 품질을 보려면 **회전/정지 포함 균형 데이터 + 샘플 확대 + (가능하면) GPU 본학습**이 필요. 150샘플 PoC로는 다수클래스 붕괴가 당연.
+- 신규 파일 `scripts/autovla_generate_smoke.py`(존재하는 이미지 샘플만 사용, 누락 skip).
+
+2026-06-05 AutoVLA collapse 원인 진단(에폭/데이터 의문 해소):
+
+- "에폭2까지 안 돈다" 오해 해소: `range(EPOCHS=2)` = epoch 0,1 각 150 step = 300 step으로 **2에폭 정상 완주**. 로그가 0-인덱스라 헷갈림. `train_autovla_lora.py` 로그를 1-인덱스(`epoch+1`, `epochs` 동반)로 변경.
+- "데이터 충분한데 직진만" 검증: 학습 첫 150행에 route_command turn_left 27 + turn_right 49(=51%) 존재, |final_y|>3 실제 큰 회전도 19개. 전체 10000행은 turn_left 1530 + turn_right 1518. **데이터에 회전은 충분하다.**
+- 진짜 원인 = **action 토큰 다수클래스 붕괴**: 첫150 토큰 빈도 token1(정지)=743(~50%), token4(전진)=301(~20%), 회전 고유 토큰은 희소. generate 결과 순항 샘플→`<act_4>` 반복, 회전 샘플→`<act_1>` 반복(디코드 final xy≈0, GT는 (10,−14.9), ADE≈10). 추론 문장은 명령 반영해 정확("turning right at the intersection")하나 궤적은 빈도 1·2위 토큰만 출력.
+- 해석: next-token CE는 다수 토큰만 찍어도 loss가 낮아져(0.03=주변분포 암기) **조건부(이미지→기동) 학습이 안 됨**. 150샘플로는 이미지→회전 신호 부족 + 토큰 불균형(특히 trailing stop=token1)으로 collapse가 필연. trajectory의 약 50%가 정지토큰인 것이 핵심.
+- 후속 수정안(택1 이상): (a) action-token loss에 inverse-frequency 가중/포컬로 정지·전진 다운웨이트, (b) trailing stop 토큰 trim 또는 horizon 단축으로 token1 비중↓, (c) 셔플·command 균형 샘플링으로 MAX_SAMPLES 확대(첫N 슬라이스 탈피), (d) 데이터 수천+ GPU 본학습. 실효 검증은 GPU 필요.
+
+2026-06-05 AutoVLA collapse 대응: 전체데이터 학습 + action-token 손실 가중 + grad checkpointing:
+
+- 전체 데이터 학습: `07_AutoVLA학습.command`에서 `MAX_SAMPLES=0`=전체 10000 사용(빈 배열 가드로 `--max-samples` 생략), DataLoader shuffle=True로 epoch마다 섞음("첫 N 슬라이스" 문제 해소). M4 추정 ≈ 67h/epoch → 실질 GPU용.
+- 손실 가중(붕괴 방지): `train_autovla_lora.py`에 `_build_action_class_weights` 추가. 학습 데이터 action 토큰 빈도로 `w=(1/freq)^0.5`, 평균 1 정규화 + `[1/cap, cap]` 클립. **action 토큰에만** 적용(추론 텍스트 토큰=1.0). model 내부 균일 CE 대신 logits로 weighted `cross_entropy`(라벨 마스킹 유지) 계산. 토글 `--balance-action-loss`(기본 1), `--action-weight-power`(0.5)/`--action-weight-cap`(5.0). 런처에 `BALANCE_ACTION_LOSS` 등 연결.
+- OOM 대응: weighted CE가 logits를 따로 물려 MPS watermark(42.4GB) 초과 OOM 발생(626M full embed/lm_head 학습이 근본 부담). `--gradient-checkpointing`(기본 1) 추가(`use_cache=False`+`gradient_checkpointing_enable`+`enable_input_require_grads`)로 활성화 메모리 절감 → 해결. GPU에도 이득.
+- 로그 1-인덱스화(`epoch+1`, `epochs`).
+- 검증(M4, 4샘플 스모크): weighted loss 정상 동작, loss 5.97→3.48로 유한·감소(이전 7→0.03 붕괴와 달리 0으로 안 떨어짐=다수토큰 치트 억제). NaN/OOM 없음.
+- 한계: 실효(회전 실제 학습) 검증은 데이터 수천+ epoch 필요 → GPU 본학습에서 확인.
+
+2026-06-05 AutoVLA 학습 체크포인트 2단계 + 완전 resume:
+
+- 장시간(M4 전체데이터 ≈ 55h/epoch) run 중단 대비. `train_autovla_lora.py`에 체크포인트/resume 추가.
+- 2단계 저장: `--save-every`(latest, 덮어쓰기) + `--keep-every`(milestone `step_NNNNNN`, `--keep-last`로 회전). 둘 다 adapter+processor+codebook+`training_state.json`+`optimizer.pt` 저장(완전 resume용). 런처 기본 `SAVE_EVERY=10`, `KEEP_EVERY=500`, `KEEP_LAST=3`.
+- `_save_checkpoint(optimizer=)`로 optimizer 상태 저장, `_rotate_milestones`로 오래된 milestone 삭제.
+- 완전 resume `--resume-from <dir>`: base+resize 후 `PeftModel.from_pretrained(is_trainable=True)`로 adapter 로드 + `optimizer.pt` 로드 + `training_state`의 epoch/step/step_in_epoch 복원. epoch별 loader를 `seed+epoch`로 seeded shuffle해 순서 재현 → 재개 epoch에서 done batch를 skip(중간 epoch resume). 로그는 append.
+- 검증(M4): run1(3 step, save_every1/keep_every3) → latest+milestone(step_000003)에 optimizer.pt/training_state(step_in_epoch=3) 생성 확인. run2(`--resume-from step_000003`, epochs2) → `RESUME_ADAPTER`/`RESUME_STATE(start_epoch=2-1, skip=3)`로 epoch1 skip, epoch2 step4·5·6 실행, global_step 3→6 연속, loss 4.6→2.7로 끊김 없이 이어짐(optimizer 복원 확인).
+- 주의: 저장 1회가 adapter(~2.4GB)+optimizer(~5GB)≈7.5GB라 save_every가 너무 잦으면 I/O가 throughput을 갉아먹는다. latest는 덮어쓰기라 디스크 안 늘고, milestone은 keep_last로 제한.
+
+2026-06-05 AutoVLA 전체데이터+가중 학습 100-step 체크포인트 분석:
+
+- 재시작 run(전체데이터, weighted loss, save_every=10)이 step 100(epoch 1/2, =epoch의 1%)까지 진행. weighted loss 4.11→0.20(step 79에서 1.65 스파이크).
+- step 100 체크포인트로 generate 분석(직진 0/200, 우회전 83/82/84, 좌회전 27): 추론 문장은 정확(속도·명령 반영, "turning right/left at the intersection")하나 **action 토큰을 0개 생성**("Trajectory:" 직후 즉시 EOS).
+- 해석: 100/10000 = 1%로 **심한 학습 부족**. 결정론적 추론 텍스트+마커+EOS는 빨리 학습됐지만, 이미지 조건부 action 토큰열은 아직 안 나옴(회피). 무가중=act_4/act_1 붕괴, 가중=즉시 EOS — 둘 다 데이터/스텝 부족의 다른 양상. 가중+EOS(weight 1.0) 동학이 초반 action 학습을 늦출 가능성도 관찰 대상.
+- 결론: 100스텝으론 판정 불가. 의미있는 판정엔 수천 스텝~1에폭 필요 → M4 ~55h/epoch라 GPU 본학습 필수. M4에선 step~1000 체크포인트에서 action 토큰 출현 여부 재확인 정도가 한계.
+- 운영 이슈: 분석마다 `/Volumes/DATASET`가 반복 언마운트되어 generate가 자주 막힘(슬립/연결 점검 필요). 학습/추론 충돌 방지로 체크포인트 스냅샷(optimizer 제외) 후 분석하는 절차 사용.
+
+2026-06-06 AutoVLA collapse 탈출(step 800) + 학습 robustness:
+
+- step 진행에 따른 생성 변화(전체데이터, weighted, fp32, 224, 3카메라): step 100=action 0개(즉시 EOS) → step 310=전부 act_1(정지) → **step 800=붕괴 탈출**.
+- step 800 생성 분석(직진 0/200, 우회전 83/82/84, 좌회전 27): 명령별로 **서로 다른 토큰 시퀀스** 생성.
+  - 직진: `act_4`(고속전진) 위주 → 예측 final (24.0, 0.0), sample0 ADE **0.18m**, sample200 ADE 2.55.
+  - 우회전: `act_94/86/38/176/...` → final (10.9, **+4.55**)로 우향(+y) 맞으나 GT +20 대비 **undershoot**(ADE~8).
+  - 좌회전: 또 다른 패턴(`act_205/17/...`). 즉 collapse 아님.
+  - 한계: turn_right 83/82/84가 동일 출력 → 아직 명령+속도 위주, 장면별 image 조건화 약함. 급회전 토큰이 코드북에서 희소(<0.1%)해 약한 회전 토큰을 써 undershoot.
+- 결론: weighted loss + 충분한 step(800=epoch의 8%)이 붕괴를 깸. 방향 검증됨(직진 정확, 회전 방향 정확·크기 약함). 회전 강화는 더 학습 + codebook/데이터 회전 보강 필요. 본격은 GPU.
+- 학습 robustness: step 809에서 `/Volumes/DATASET` 언마운트로 이미지 1장 못 읽어 전체 크래시. `AutoVLASFTCollator._load_images`에 재시도(3회×2s) + 실패 샘플 drop, 배치 전부 실패 시 `None` 반환→트레이너가 step skip. 짧은 마운트 블립에 학습이 죽지 않게 함(완전 언마운트 지속 시엔 skip만 누적되므로 마운트 안정화가 근본). step 800 체크포인트 보존됨 → auto-resume 가능.
+
+2026-06-06 07 launcher 자동 resume(실수 방지):
+
+- 증상: 학습 재개하려 07을 그냥 실행했는데 resume가 안 되고 step1부터 새로 시작(train_log가 잘림). 원인: launcher `RESUME_FROM` 기본값이 빈 값이라 fresh start. 단 fresh run이 save_every(10) 전 step4에서 멈춰 가중치는 안 덮였고 step-100 체크포인트는 보존됨(로그만 손실).
+- 수정: `07_AutoVLA학습.command`에 자동 resume 추가 — `RESUME_FROM`이 비어 있어도 `OUTPUT_DIR/training_state.json`이 있으면 자동으로 그 dir에서 이어서 학습(adapter+optimizer+step 복원). 처음부터 다시 하려면 `FRESH=1`. 실행 로그에 `RESUME_FROM` 상태 표시. 이로써 07을 무심코 다시 돌려 진행분을 덮어쓰는 사고를 방지.
+- 운영: 실학습/생성은 M4에 3B 모델을 동시 2개 못 올림(메모리 폭증) → 분석할 땐 학습을 멈추고(Ctrl-C) 단독으로 generate 후 `./07`로 auto-resume하는 절차 사용. 학습 도중 분석은 비권장.
+
+2026-06-04~06 CARLA learned closed-loop eval 개선(이번 세션, 위 AutoVLA와 함께 커밋):
+
+- 전진 불가 원인 분석: learned 정책이 정지 상태(speed≈0)에서 미래 변위≈0 waypoint를 내고, waypoint→control 어댑터가 throttle 0을 주어 출발 못 하는 speed-shortcut 데드락 확인(DummyDrivingBackbone이 ego_speed를 직접 입력으로 쓰고, 데이터의 32%가 정지 프레임). eval 우회책으로 warm-up 강제 throttle(목표속도 도달 OR 시간 충족 시 해제) 사용.
+- 글로벌 start→goal 라우팅: `--spawn-goal-index`로 CARLA `GlobalRoutePlanner` 사용. CrossOver Python37엔 numpy/networkx가 없어 import 실패 → 순수 Python Dijkstra(`_plan_route_waypoints`, `waypoint.next`+lane change, heapq/stdlib만) 폴백 추가. route_command는 RoadOption→command 매핑(`route_command_from_road_option`) 또는 yaw-delta. 도착 감지/route_completion 추가.
+- train/eval 정합: 학습 route_waypoints는 `waypoint.next(2m)` 등간격인데 eval 글로벌 플랜은 불규칙(2~4m)이라 회전을 일찍 꺾어 가로등 충돌 → eval route waypoint를 누적거리 기준 **고정 2m 등간격 재샘플**(`upcoming_waypoints_ego`)로 맞춤. route_command lookahead도 학습 수집값(30m)에 맞춤.
+- HUD 영상: warm-up 구간도 프레임 기록(`phase=WARM-UP`)해서 영상에 포함. HUD 영상용 **3인칭 체이스 카메라**(`_spawn_chase_camera`, 뒤7m·위3.5m·-15°) 추가 — 모델 입력은 전방 카메라 유지, 영상만 체이스. render에 phase/policy_type/action_tokens 표시.
+- 안정화: 이미 같은 맵이면 `load_world` 재로드(타임아웃·크래시 원인) 생략하고 현재 world 재사용(REUSING_WORLD). `05_평가.command`가 policy server 기동 전 포트(8765) 점유 프로세스·잔존 eval 클라이언트를 정리하고, 기동을 `POLICY_SERVER_READY`+PID 생존으로 확인(Address already in use/유령 프로세스로 인한 fatal 방지). synchronous mode/fixed delta 옵션 추가.
+- AutoVLA eval 통합(구현, closed-loop 실검증 미완): `POLICY_TYPE=autovla`면 serve/eval/05가 회귀 어댑터 대신 generate 모델(`autovla_generate`)로 평가하도록 배선. 05 기본 checkpoint를 `checkpoints/m10d_autovla_lora`로. 실제 CARLA closed-loop 검증은 후속.

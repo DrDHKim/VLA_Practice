@@ -28,6 +28,30 @@ def route_command_from_yaw_delta(delta_yaw_rad: float, threshold_rad: float = 0.
     return "lane_follow"
 
 
+ROAD_OPTION_TO_COMMAND = {
+    "LEFT": "turn_left",
+    "RIGHT": "turn_right",
+    "STRAIGHT": "lane_follow",
+    "LANEFOLLOW": "lane_follow",
+    "CHANGELANELEFT": "lane_follow",
+    "CHANGELANERIGHT": "lane_follow",
+    "VOID": "lane_follow",
+}
+
+
+def route_command_from_road_option(road_option: Any, fallback: str = "lane_follow") -> str:
+    """Map a CARLA agents ``RoadOption`` to this project's route command vocabulary.
+
+    Accepts the enum member, its name string, or its integer value. The model
+    only distinguishes {lane_follow, turn_left, turn_right}, so STRAIGHT and the
+    lane-change options collapse to ``lane_follow``.
+    """
+    name = getattr(road_option, "name", None)
+    if name is None:
+        name = str(road_option)
+    return ROAD_OPTION_TO_COMMAND.get(name.upper(), fallback)
+
+
 def route_command_from_poses(
     poses: Sequence[Any],
     current_index: int = 0,
