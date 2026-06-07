@@ -9,7 +9,6 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 OFFLINE_DIR = REPO_ROOT / "data" / "offline"
-WHEELHOUSE = OFFLINE_DIR / "wheels" / "macos-py310-pinned"
 CARLA_DIR = OFFLINE_DIR / "simulators" / "carla"
 REQUIRED_MODULES = [
     "torch",
@@ -24,7 +23,6 @@ REQUIRED_MODULES = [
     "numpy",
     "scipy",
     "tqdm",
-    "nuscenes",
     "pytest",
 ]
 SYSTEM_TOOLS = {
@@ -147,15 +145,7 @@ def check_torch() -> int:
 
 def check_offline_assets() -> int:
     issues = 0
-    required_dirs = [
-        WHEELHOUSE,
-        OFFLINE_DIR / "hf_models" / "Qwen2.5-VL-3B-Instruct",
-        OFFLINE_DIR / "datasets" / "nuscenes",
-        OFFLINE_DIR / "datasets" / "bench2drive" / "Bench2Drive-mini",
-        OFFLINE_DIR / "repos" / "navsim",
-        OFFLINE_DIR / "repos" / "Bench2Drive",
-        OFFLINE_DIR / "repos" / "nuscenes-devkit",
-    ]
+    required_dirs = [OFFLINE_DIR / "hf_models" / "Qwen2.5-VL-3B-Instruct"]
     for path in required_dirs:
         if path.exists():
             ok(f"exists: {path.relative_to(REPO_ROOT)}")

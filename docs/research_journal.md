@@ -2160,3 +2160,14 @@ Driving evaluation table:
 - 생성 지연 중 CARLA world가 비동기로 진행되는 평가 오류를 막기 위해 learned closed-loop 기본값을 synchronous mode, fixed delta 0.2초(5 FPS)로 변경했다. HUD/report에 생성 reasoning, action token, predicted waypoint, route waypoint, control을 기록한다.
 - 사전 검증: launcher/shell 구문 검사, local Python 및 CrossOver Python 3.7 compile, `git diff --check`, HUD MP4 writer 실제 생성, AutoVLA/route/control 관련 unit test 16개 통과. CARLA port 2000은 현재 닫혀 있지만 05가 `01_카를라실행.command`를 자동 실행하도록 준비되어 있다. 실제 Town01 closed-loop 주행은 사용자 실행 후 결과 확인이 필요하다.
 - HUD reasoning 가독성: 기존 한 줄 46자 절단을 제거하고 reasoning을 별도 최대 5줄로 줄바꿈해 약 225자까지 표시한다. 늘어난 텍스트 영역과 겹치지 않도록 steer/throttle/brake bar를 아래로 이동했다.
+
+2026-06-07 launcher 중심 프로젝트 정리:
+
+- 사용 승인 후 launcher에서 직접·간접 호출되지 않는 script 9개를 삭제했다: offline asset/paper download, offline budget, CARLA camera diagnostic, nuScenes prepare/open-loop, 5090 handoff, Mac scale sweep 경로.
+- `launchers/*.command`에서 shell 호출과 Python import를 재귀 추적한 결과, 남은 launcher 연결 script 17개와 `src/vla_drive` Python 모듈 전체가 현재 실행 경로에서 도달 가능함을 확인했다.
+- 수동 보존 script는 `check_mac_readiness.py`(AGENTS 필수 검증)와 `autovla_generate_smoke.py`(AutoVLA 단독 생성 검사)다.
+- 추가 미연결 후보는 삭제하지 않고 보고 대상으로 남겼다: `src/vla_drive/configs/base.yaml`, `src/vla_drive/configs/nuscenes_open_loop.yaml`, `outputs/handoff/5090_manifest.json`, 삭제된 script를 가리키는 문서 참조.
+- 사용자 승인 후 고립된 `src/vla_drive/configs/nuscenes_open_loop.yaml`과 `outputs/handoff/5090_manifest.json`을 삭제했다. 현재 안내 문서에서 삭제된 script 실행 지시를 제거했으며, 과거 실험 기록의 명령은 역사 보존을 위해 유지했다. `base.yaml`은 실행에 연결되지 않은 초기 공통 설정 템플릿이지만 사용자 요청으로 보존한다.
+- 검증 과정에서 생성된 `__pycache__`, `.pytest_cache`, `.matplotlib_cache`를 삭제했다. 전체 unit test 33개와 launcher/shell 구문 검사는 삭제 전후 정상 통과했다.
+- 사용자 승인 후 현재 launcher가 읽지 않는 초기 공통 설정 템플릿 `src/vla_drive/configs/base.yaml`도 삭제했다.
+- 커밋 전 전체 diff 재감사에서 `check_mac_readiness.py`와 setup/data/TASKS 문서가 삭제된 offline 자산을 여전히 필수 또는 준비 완료로 취급하는 누락을 발견했다. readiness 필수 asset을 현재 launcher가 사용하는 Qwen2.5-VL-3B와 CARLA 경로로 맞추고, 현재 유지 자산/용량/외부 dataset 제거 상태를 문서에 반영했다.

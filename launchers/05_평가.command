@@ -22,7 +22,7 @@ CARLA_TIMEOUT_SECONDS="${CARLA_TIMEOUT_SECONDS:-600.0}"
 # ROUTE_COMPLETION_DISTANCE_M가 100% completion 기준 목표 거리다.
 ROUTE_COUNT="${ROUTE_COUNT:-1}"
 ROUTE_SECONDS="${ROUTE_SECONDS:-30}"
-SPAWN_START_INDEX="${SPAWN_START_INDEX:-10}"
+SPAWN_START_INDEX="${SPAWN_START_INDEX:-20}"
 # SPAWN_GOAL_INDEX를 0 이상으로 주면 CARLA GlobalRoutePlanner가 시작→도착
 # 글로벌 루트를 자동 생성하고, 그 루트에서 route-command를 만들어 모델에
 # 입력한다. route waypoint는 HUD/분석용이다 (-1이면 기존 차선추종 방식).

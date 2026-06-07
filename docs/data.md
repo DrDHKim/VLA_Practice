@@ -25,68 +25,11 @@ Scale 정책:
 - RGB, ego state, route command, expert waypoints/control을 기록한다.
 - train/val/test split은 frame 단위가 아니라 route 단위로 나눈다.
 
-## nuScenes 다음
+## 외부 dataset
 
-full nuScenes보다 nuScenes mini를 먼저 사용한다.
-
-mini split은 MacBook schema/debug 작업에 적합하다. full nuScenes는 먼저 MacBook에서 가능한 변환/샘플링/metric path를 검증하고, 용량/시간 한계가 확인되면 RTX 5090 또는 external storage path에서 처리한다.
-
-작업:
-
-- sample을 common schema로 변환한다.
-- ego-frame future trajectory를 추출한다.
-- scene description 또는 route command를 text prompt로 매핑한다.
-- 처음에는 open-loop metric만 실행한다.
-
-현재 MacBook smoke 변환:
-
-```bash
-.conda/bin/python scripts/prepare_nuscenes.py \
-  --input-tar data/offline/datasets/nuscenes/v1.0-mini.tgz \
-  --output-root /private/tmp/vla_drive_nuscenes_mini \
-  --max-samples 40 \
-  --future-steps 8 \
-  --sample-stride 2
-```
-
-출력:
-
-```text
-/private/tmp/vla_drive_nuscenes_mini/
-├── metadata.jsonl
-├── conversion_summary.json
-└── images/
-```
-
-Mapping:
-
-- `camera_front`: nuScenes key-frame `CAM_FRONT` 이미지를 subset output으로 추출한다.
-- `future_waypoints_ego`: 현재 ego pose 기준 future sample 8개의 ego-frame `(x, y)` displacement다.
-- `ego_speed_mps`: 현재 pose와 다음 pose의 timestamp/translation 차이로 계산한다.
-- `route_command`: 마지막 future waypoint의 lateral offset이 `> 1.5m`면 `turn_left`, `< -1.5m`면 `turn_right`, 그 외 `lane_follow`.
-- `reasoning`: route command를 `keep_lane`, `turn_left`, `turn_right`로 매핑하고, 속도 `< 0.5m/s`면 `slow_or_stop`.
-
-평가 smoke:
-
-```bash
-.conda/bin/python -m vla_drive.evaluation.evaluator \
-  --checkpoint-path checkpoints/m4_dummy/latest.pt \
-  --metadata-path /private/tmp/vla_drive_nuscenes_mini/metadata.jsonl \
-  --report-path outputs/reports/m9_nuscenes_carla_checkpoint_open_loop.json \
-  --max-samples 40 --batch-size 4 --image-size 64 --device cpu
-```
-
-full 변환은 아직 하지 않는다. mini tar에서 JSON table을 읽고 선택 이미지만 추출하는 40-sample 변환은 MacBook에서 약 1분 내로 완료됐다. full 변환은 전체 image extraction, storage, train/eval 반복 시간이 커지므로 5090 handoff 근거가 생긴 뒤 확장한다.
-
-## NAVSIM / Bench2Drive 이후
-
-baseline training이 동작한 뒤 추가한다.
-
-작업:
-
-- install을 검증한다.
-- metric을 `closed_loop_metrics.py`에 매핑한다.
-- 가능한 경우 literature metric과 비교한다.
+nuScenes/NAVSIM/Bench2Drive 변환 경로와 offline asset은 현재 launcher 중심 pipeline에서 제거했다.
+현재 수집, 학습, 평가는 CARLA metadata를 기준으로 한다. 외부 dataset을 다시 도입할 때는 launcher 진입점과
+필요 용량을 먼저 정의한 뒤 별도 milestone로 추가한다.
 
 ## Observation Schema
 

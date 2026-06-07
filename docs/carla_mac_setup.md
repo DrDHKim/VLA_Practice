@@ -116,20 +116,7 @@ CARLA가 켜진 뒤 별도 shell에서 연결을 확인한다.
 ./launchers/02_카를라연결확인.command
 ```
 
-RGB camera가 실제 색을 내는지 확인하려면 CrossOver bottle의 Python으로 진단 script를 실행한다.
-
-```bash
-/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine \
-  --bottle carla-rgb64 \
-  --cx-app 'C:\Python37\python.exe' \
-  scripts/diagnose_carla_camera_sensors.py \
-  --host 127.0.0.1 \
-  --port 2000 \
-  --timeout 60 \
-  --out-dir /private/tmp/carla_camera_diag
-```
-
-성공 기준은 `sensor.camera.rgb`의 raw stats에서 `nonzero`가 alpha-only 값인 `width * height` 수준이 아니라, B/G/R까지 채워진 값으로 나오는 것이다. 검증 당시 `640x360` RGB default frame은 `nonzero=921399`였다.
+CARLA 연결 상태는 `launchers/02_카를라연결확인.command`로 확인한다. RGB 출력은 `launchers/06_데이터수집.command`가 생성한 scene 이미지와 report로 검증한다.
 
 ## 정리 기준
 

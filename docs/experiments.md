@@ -116,7 +116,7 @@ Interpretation:
 현재 handoff package:
 
 ```text
-outputs/handoff/5090_manifest.json
+현재 launcher와 `docs/research_journal.md`에 기록된 실행 설정
 ```
 
 전환 사유:
@@ -137,7 +137,7 @@ outputs/handoff/5090_manifest.json
 6. lora_smoke
 ```
 
-정확한 command는 `outputs/handoff/5090_manifest.json`의 `first_5090_commands`와 `docs/setup.md`의 RTX 5090 section을 따른다.
+정확한 command는 현재 launcher 상단 설정과 `docs/setup.md`의 RTX 5090 section을 따른다.
 
 ### E08 5090 Expansion
 

@@ -66,9 +66,8 @@
 │       └── notes/               # 논문별 요약 노트
 ├── src/vla_drive/
 │   ├── configs/
-│   │   ├── base.yaml
 │   │   ├── carla_rgb_waypoint.yaml
-│   │   └── nuscenes_open_loop.yaml
+│   │   └── carla_mac_dataset.yaml
 │   ├── data/
 │   │   ├── datasets.py
 │   │   ├── transforms.py
@@ -95,11 +94,8 @@
 │       ├── seed.py
 │       └── io.py
 ├── scripts/
-│   ├── download_papers.sh
-│   ├── prepare_nuscenes.py
 │   ├── collect_carla_data.py
 │   ├── train_lora.sh
-│   ├── eval_open_loop.sh
 │   └── eval_carla.sh
 ├── data/                         # 실제 데이터는 git에 넣지 않음
 ├── checkpoints/                  # 모델 weight 저장 위치
@@ -134,11 +130,10 @@
   - `src/vla_drive/models/vla_policy.py`
   - `src/vla_drive/training/train.py`
 
-### Phase 3: nuScenes/NAVSIM open-loop 평가
+### Phase 3: CARLA open-loop 평가
 
-- 목표: closed-loop 이전에 trajectory L2, collision proxy, route adherence 등을 확인
+- 목표: 수집한 CARLA metadata에서 closed-loop 이전에 trajectory L2, collision proxy, route adherence 등을 확인
 - 구현 파일:
-  - `scripts/prepare_nuscenes.py`
   - `src/vla_drive/evaluation/open_loop_metrics.py`
   - `src/vla_drive/evaluation/evaluator.py`
 
@@ -165,11 +160,9 @@
 
 ## 바로 다음 작업
 
-1. `scripts/download_papers.sh`를 실행해 주요 논문 PDF를 저장한다.
-2. `docs/setup.md`를 보고 오프라인 작업용 모델/데이터/패키지를 미리 받는다.
-3. `docs/setup.md`에 맞춰 MacBook에서 가능한 실험을 먼저 끝까지 밀고, 리소스 한계가 확인될 때만 5090/AIP로 전환한다.
-4. `src/vla_drive/simulation/`부터 구현해 CARLA 데이터 수집 루프를 MacBook에서 먼저 완성한다.
-5. `src/vla_drive/models/`의 TODO를 채워 waypoint prediction baseline을 만든다.
+1. `launchers/01_카를라실행.command`로 CARLA를 실행한다.
+2. `launchers/06_데이터수집.command`로 CARLA scene을 수집한다.
+3. `launchers/07_AutoVLA학습.command`로 학습하고 `launchers/05_평가.command`로 평가한다.
 
 ## 문서 사용법
 

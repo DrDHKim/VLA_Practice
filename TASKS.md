@@ -30,12 +30,18 @@
 
 - 문서와 stub 구조가 준비됨.
 - MacBook Python 3.10 local environment가 준비됨.
-- P0-P4 offline asset은 `data/offline/`에 준비됨.
-- 일반 MacBook offline 작업은 `data/offline/wheels/macos-py310-pinned`를 사용함.
+- 현재 launcher 필수 offline asset인 Qwen2.5-VL-3B와 CARLA runtime이 `data/offline/`에 준비됨.
+- 설치용 wheelhouse, 외부 dataset/repo, 추가 대형 model은 용량 정리 과정에서 제거됨.
 - 세부 목록과 용량 정책은 `docs/setup.md`를 기준으로 확인할 것.
 - 현재 MacBook readiness에서 CARLA server runtime은 준비됐지만, macOS native `carla` PythonAPI와 MPS availability는 주의 대상이다. 자세한 해결책은 `docs/setup.md`와 `docs/carla_mac_setup.md`를 따른다.
 
 현재 구현 대상: `M10D: Autopilot Sync Dataset Collection and Validation`
+
+정리 상태:
+
+- 현재 실행 진입점은 `launchers/*.command`다.
+- 완료된 과거 milestone의 파일 목록에는 삭제된 실험 script가 기록으로 남을 수 있으나 현재 실행 대상으로 사용하지 않는다.
+- 현재 open-loop/closed-loop 평가는 `launchers/05_평가.command`에서 실행한다.
 
 ## M1: CARLA Connection
 
@@ -145,7 +151,6 @@
 - `src/vla_drive/utils/seed.py`
 - `src/vla_drive/utils/logging.py`
 - `scripts/train_lora.sh`
-- `src/vla_drive/configs/base.yaml`
 
 목표:
 
@@ -174,21 +179,18 @@
 
 - `src/vla_drive/evaluation/open_loop_metrics.py`
 - `src/vla_drive/evaluation/evaluator.py`
-- `scripts/eval_open_loop.sh`
-- `scripts/prepare_nuscenes.py`
-- `src/vla_drive/configs/nuscenes_open_loop.yaml`
+- `launchers/05_평가.command`
 
 목표:
 
-- CARLA/nuScenes sample에서 trajectory metric을 계산한다.
+- CARLA sample에서 trajectory metric을 계산한다.
 
 단계:
 
 1. ADE/FDE metric을 확장한다.
 2. route deviation과 collision proxy metric을 추가한다.
 3. evaluation report JSON을 저장한다.
-4. `nuscenes_open_loop.yaml`로 checkpoint, dataset, report path를 제어한다.
-5. nuScenes mini 변환은 CARLA eval path가 검증된 뒤 진행한다.
+4. `launchers/05_평가.command`로 checkpoint, dataset, report path를 제어한다.
 
 완료 기준:
 
@@ -255,7 +257,6 @@
 
 파일:
 
-- `scripts/run_mac_scale_sweep.sh`
 - `src/vla_drive/configs/carla_rgb_waypoint.yaml`
 - `docs/experiments.md`
 - `docs/research_journal.md`
@@ -286,10 +287,8 @@
 
 파일:
 
-- `scripts/prepare_nuscenes.py`
 - `src/vla_drive/data/datasets.py`
 - `src/vla_drive/data/schemas.py`
-- `src/vla_drive/configs/nuscenes_open_loop.yaml`
 - `docs/data.md`
 
 목표:
@@ -317,7 +316,6 @@
 
 파일:
 
-- `scripts/export_handoff_bundle.sh`
 - `docs/setup.md`
 - `docs/experiments.md`
 - `docs/research_journal.md`
@@ -338,7 +336,7 @@
 
 완료 기준:
 
-- `outputs/handoff/5090_manifest.json`이 생성된다.
+- 현재 launcher와 문서에 5090 실행 command가 기록된다.
 - MacBook에서 5090 전환 사유가 문서화되어 있다.
 - 5090에서 처음 실행할 data collection, training, open-loop, closed-loop command가 명시되어 있다.
 
@@ -458,7 +456,7 @@
 - `src/vla_drive/configs/carla_rgb_waypoint.yaml`
 - `tests/unit/test_route_command.py`
 - `scripts/train_lora.sh`
-- `scripts/eval_open_loop.sh`
+- `launchers/05_평가.command`
 - `scripts/eval_carla.sh`
 - `docs/experiments.md`
 - `docs/research_journal.md`
@@ -505,7 +503,7 @@
 - `docs/experiments.md`
 - `docs/research_journal.md`
 - `scripts/train_lora.sh`
-- `scripts/eval_open_loop.sh`
+- `launchers/05_평가.command`
 - `scripts/eval_carla.sh`
 
 목표:
