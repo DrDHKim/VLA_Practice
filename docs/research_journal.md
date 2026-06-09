@@ -2171,3 +2171,9 @@ Driving evaluation table:
 - 검증 과정에서 생성된 `__pycache__`, `.pytest_cache`, `.matplotlib_cache`를 삭제했다. 전체 unit test 33개와 launcher/shell 구문 검사는 삭제 전후 정상 통과했다.
 - 사용자 승인 후 현재 launcher가 읽지 않는 초기 공통 설정 템플릿 `src/vla_drive/configs/base.yaml`도 삭제했다.
 - 커밋 전 전체 diff 재감사에서 `check_mac_readiness.py`와 setup/data/TASKS 문서가 삭제된 offline 자산을 여전히 필수 또는 준비 완료로 취급하는 누락을 발견했다. readiness 필수 asset을 현재 launcher가 사용하는 Qwen2.5-VL-3B와 CARLA 경로로 맞추고, 현재 유지 자산/용량/외부 dataset 제거 상태를 문서에 반영했다.
+
+2026-06-09 AutoVLA checkpoint 로컬 보관 상태:
+
+- `checkpoints/m10d_autovla_lora/`는 약 12GB이며 `.gitignore`의 `checkpoints/`, `*.pt`, `*.safetensors` 규칙과 offline 정책에 따라 Git에 커밋하지 않고 로컬 artifact로 보관한다.
+- 최신 resume 기준은 `training_state.json`: epoch 1/2, global step 1200, step_in_epoch 1205, loss 0.0002822203. `train_summary.json`의 300-step/final loss 0.03035 값은 초기 PoC 완료 시점 기록이므로 최신 resume 상태로 해석하지 않는다.
+- 재현/무결성 확인용 SHA-256: `adapter_model.safetensors`=`36b78849a0d31109c70ceca6e4bc5f250db51cf60c7dd8771aa276fea59bcead`, `optimizer.pt`=`4182fbf2b2cfcd576013a154836740d9ba98e3dfa925cefd66c626bf1dd9aeea`, `training_state.json`=`09189024bc50e6ff62059e140b541012ea23fbf090bcff0390364045b3849675`, `trajectory_codebook.json`=`ee637b10e0def08e2e8366e9c7f5ca0e1105b7fe921dbd7251fcb3323487a1dd`.
